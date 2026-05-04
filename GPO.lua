@@ -1,10 +1,86 @@
 -- Speedhack + Flyhack + ESP (with Chams) + Infinite Jump + Island ESP with Rayfield UI
---ESP немного криво работает
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local Camera = Workspace.CurrentCamera
+
+-- ==================== ПРОВЕРКА ПЛЕЙСА ====================
+-- Укажите здесь ID игр, в которых разрешен запуск скрипта
+local ALLOWED_PLACE_IDS = {
+    [3978370137] = "Grand Piece Online 1 Sea",      -- 1 Sea GPO
+}
+
+local currentPlaceId = game.PlaceId
+local gameName = ALLOWED_PLACE_IDS[currentPlaceId] or "Unknown Game"
+
+-- Проверка: разрешен ли текущий плейс?
+if not ALLOWED_PLACE_IDS[currentPlaceId] then
+    -- Если игра не разрешена, показываем предупреждение и останавливаем скрипт
+    local warningMessage = string.format(
+        "This script is not allowed in the current game!\n\n"
+        .. "Current Place ID: %d\n"
+        .. "Game Name: %s\n\n"
+        .. "This script only works in:\n",
+        currentPlaceId,
+        gameName
+    )
+    
+    -- Добавляем список разрешенных игр в сообщение
+    for placeId, name in pairs(ALLOWED_PLACE_IDS) do
+        warningMessage = warningMessage .. string.format("• %s (ID: %d)\n", name, placeId)
+    end
+    
+    warningMessage = warningMessage .. "\nThe script will now stop execution."
+    
+    -- Пытаемся показать уведомление через Rayfield (если он загрузится)
+    local success, rayfield = pcall(function()
+        return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    end)
+    
+    if success and rayfield then
+        local tempWindow = rayfield:CreateWindow({
+            Name = "Error",
+            Icon = 0,
+            LoadingTitle = "Place ID Error",
+            LoadingSubtitle = "Script stopped",
+            Theme = "Default",
+            KeySystem = false
+        })
+        local tempTab = tempWindow:CreateTab("Error", 0)
+        tempTab:CreateParagraph({
+            Title = "⚠️ SCRIPT BLOCKED ⚠️",
+            Content = warningMessage
+        })
+        wait(5)
+        tempWindow:Destroy()
+    else
+        -- Если Rayfield не загрузился, показываем обычное предупреждение
+        warn("[Simforea Hub] " .. warningMessage)
+        for i = 1, 10 do
+            print("=" .. string.rep("=", 50))
+        end
+        print("⚠️ SIMFOREA HUB - PLACE ID ERROR ⚠️")
+        print("Current Place ID: " .. currentPlaceId)
+        print("Game Name: " .. gameName)
+        print("")
+        print("This script only works in:")
+        for placeId, name in pairs(ALLOWED_PLACE_IDS) do
+            print("  • " .. name .. " (ID: " .. placeId .. ")")
+        end
+        print("")
+        print("Script execution stopped.")
+        for i = 1, 10 do
+            print("=" .. string.rep("=", 50))
+        end
+    end
+    
+    -- Останавливаем выполнение скрипта
+    return
+end
+
+-- Успешный запуск! Показываем информацию о текущей игре
+print(string.format("[Simforea Hub] Script loaded successfully in: %s (Place ID: %d)", gameName, currentPlaceId))
 
 -- ==================== НАСТРОЙКИ ====================
 local DEFAULT_SPEEDHACK_ENABLED = false
@@ -67,7 +143,7 @@ local espObjects = {}
 local chamsObjects = {}
 local islandESPObjects = {}
 
--- Список островов из игры
+-- Список островов из игры (проверяем наличие папки Islands, чтобы не было ошибок)
 local islandsList = {
     "???? Shrine",
     "A rock",
@@ -97,12 +173,12 @@ local islandsList = {
 -- ==================== RAYFIELD UI ====================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Создание окна
+-- Создание окна с информацией о текущей игре
 local Window = Rayfield:CreateWindow({
-    Name = "Simforea Hub",
+    Name = "Simforea Hub | " .. gameName,
     Icon = 0,
     LoadingTitle = "Simforea Hub",
-    LoadingSubtitle = "By PetraAnchor",
+    LoadingSubtitle = "Loaded in: " .. gameName,
     Theme = "Default",
     ConfigurationSaving = {
         Enabled = true,
@@ -408,7 +484,11 @@ InfoTab:CreateSection("About")
 
 InfoTab:CreateParagraph({
     Title = "Simforea Hub",
-    Content = "Features:\n✓ Speedhack\n✓ Flyhack (AssemblyLinearVelocity)\n✓ Infinite Jump\n✓ Player ESP (2D Boxes + 3D Chams)\n✓ Island ESP\n\nHotkeys:\nInsert - Toggle Speedhack\nHome - Toggle Flyhack\nPageUp - Toggle Infinite Jump\nEnd - Toggle Island ESP"
+    Content = string.format(
+        "Current Game: %s\nPlace ID: %d\n\nFeatures:\n✓ Speedhack\n✓ Flyhack (AssemblyLinearVelocity)\n✓ Infinite Jump\n✓ Player ESP (2D Boxes + 3D Chams)\n✓ Island ESP\n\nHotkeys:\nInsert - Toggle Speedhack\nHome - Toggle Flyhack\nPageUp - Toggle Infinite Jump\nEnd - Toggle Island ESP",
+        gameName,
+        currentPlaceId
+    )
 })
 
 -- ==================== ESP ФУНКЦИИ (ИГРОКИ) ====================
@@ -962,6 +1042,6 @@ end)
 -- Уведомление о запуске
 Rayfield:Notify({
     Title = "Simforea Hub",
-    Content = "Loaded!",
+    Content = string.format("Loaded in: %s!\nFeatures: Player ESP + Island ESP + Infinite Jump + Fly + Speedhack!", gameName),
     Duration = 5
 })
