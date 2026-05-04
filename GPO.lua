@@ -8,7 +8,7 @@ local Camera = Workspace.CurrentCamera
 -- ==================== ПРОВЕРКА ПЛЕЙСА ====================
 -- Укажите здесь ID игр, в которых разрешен запуск скрипта
 local ALLOWED_PLACE_IDS = {
-    [3978370137] = "Grand Piece Online 1 Sea",      -- 1 Sea GPO
+    [3978370137] = "Grand Piece Online 1 Sea",      -- GPO 1 Sea
 }
 
 local currentPlaceId = game.PlaceId
@@ -16,31 +16,30 @@ local gameName = ALLOWED_PLACE_IDS[currentPlaceId] or "Unknown Game"
 
 -- Проверка: разрешен ли текущий плейс?
 if not ALLOWED_PLACE_IDS[currentPlaceId] then
-    -- Если игра не разрешена, показываем предупреждение и останавливаем скрипт
-    local warningMessage = string.format(
-        "This script is not allowed in the current game!\n\n"
-        .. "Current Place ID: %d\n"
-        .. "Game Name: %s\n\n"
-        .. "This script only works in:\n",
-        currentPlaceId,
-        gameName
-    )
-    
-    -- Добавляем список разрешенных игр в сообщение
+    -- Если игра не разрешена, показываем предупреждение в консоль
+    print("=" .. string.rep("=", 60))
+    print("⚠️ SIMFOREA HUB - PLACE ID ERROR ⚠️")
+    print("=" .. string.rep("=", 60))
+    print("Current Place ID: " .. currentPlaceId)
+    print("Game Name: " .. gameName)
+    print("")
+    print("This script only works in the following games:")
     for placeId, name in pairs(ALLOWED_PLACE_IDS) do
-        warningMessage = warningMessage .. string.format("• %s (ID: %d)\n", name, placeId)
+        print("  • " .. name .. " (ID: " .. placeId .. ")")
     end
+    print("")
+    print("Script execution stopped.")
+    print("=" .. string.rep("=", 60))
     
-    warningMessage = warningMessage .. "\nThe script will now stop execution."
-    
-    -- Пытаемся показать уведомление через Rayfield (если он загрузится)
+    -- Пытаемся показать уведомление через Rayfield (без задержки)
     local success, rayfield = pcall(function()
         return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
     end)
     
     if success and rayfield then
+        -- Создаем временное окно без задержек
         local tempWindow = rayfield:CreateWindow({
-            Name = "Error",
+            Name = "Simforea Hub - Error",
             Icon = 0,
             LoadingTitle = "Place ID Error",
             LoadingSubtitle = "Script stopped",
@@ -49,30 +48,11 @@ if not ALLOWED_PLACE_IDS[currentPlaceId] then
         })
         local tempTab = tempWindow:CreateTab("Error", 0)
         tempTab:CreateParagraph({
-            Title = "⚠️ SCRIPT BLOCKED ⚠️",
-            Content = warningMessage
+            Title = "⚠️ WRONG GAME ⚠️",
+            Content = "Current Place ID: " .. currentPlaceId .. "\nGame Name: " .. gameName .. 
+                      "\n\nThis script only works in allowed games.\n\nPleaseCheckAllowedGames."
         })
-        wait(5)
-        tempWindow:Destroy()
-    else
-        -- Если Rayfield не загрузился, показываем обычное предупреждение
-        warn("[Simforea Hub] " .. warningMessage)
-        for i = 1, 10 do
-            print("=" .. string.rep("=", 50))
-        end
-        print("⚠️ SIMFOREA HUB - PLACE ID ERROR ⚠️")
-        print("Current Place ID: " .. currentPlaceId)
-        print("Game Name: " .. gameName)
-        print("")
-        print("This script only works in:")
-        for placeId, name in pairs(ALLOWED_PLACE_IDS) do
-            print("  • " .. name .. " (ID: " .. placeId .. ")")
-        end
-        print("")
-        print("Script execution stopped.")
-        for i = 1, 10 do
-            print("=" .. string.rep("=", 50))
-        end
+        -- Не ждем и не удаляем окно, оставляем пользователю закрыть его самому
     end
     
     -- Останавливаем выполнение скрипта
@@ -80,7 +60,7 @@ if not ALLOWED_PLACE_IDS[currentPlaceId] then
 end
 
 -- Успешный запуск! Показываем информацию о текущей игре
-print(string.format("[Simforea Hub] Script loaded successfully in: %s (Place ID: %d)", gameName, currentPlaceId))
+print("[Simforea Hub] Script loaded successfully in: " .. gameName .. " (Place ID: " .. currentPlaceId .. ")")
 
 -- ==================== НАСТРОЙКИ ====================
 local DEFAULT_SPEEDHACK_ENABLED = false
@@ -143,7 +123,7 @@ local espObjects = {}
 local chamsObjects = {}
 local islandESPObjects = {}
 
--- Список островов из игры (проверяем наличие папки Islands, чтобы не было ошибок)
+-- Список островов из игры (Deepwoken)
 local islandsList = {
     "???? Shrine",
     "A rock",
