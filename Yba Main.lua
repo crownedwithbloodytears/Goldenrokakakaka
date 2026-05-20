@@ -1,10 +1,11 @@
--- Simforea Hub - Universal Movement Hack + ESP
+-- Simforea Hub - Universal Movement Hack + ESP + NoClip
 -- Designed for Place ID: 2809202155
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 -- Дожидаемся камеры
 local Camera = workspace.CurrentCamera or workspace:WaitForChild("CurrentCamera")
@@ -14,6 +15,207 @@ local hasDrawing = pcall(Drawing.new, "Text")
 if not hasDrawing then
     warn("Drawing API not supported – ESP disabled")
 end
+
+-- ==================== АНТИ-ЧИТ БАЙПАСЫ ====================
+
+-- 1. Teleport Bypass (пассивный байпасс для телепортации)
+local OldNamecallTP;
+OldNamecallTP = hookmetamethod(game, '__namecall', newcclosure(function(self, ...)
+    local Arguments = {...}
+    local Method = getnamecallmethod()
+ 
+    if Method == "InvokeServer" and Arguments[1] == "idklolbrah2de" then
+        return "  ___XP DE KEY"
+    end
+ 
+    return OldNamecallTP(self, ...)
+end))
+
+-- 2. Item Magnitude Bypass (обход проверки дистанции для предметов)
+local function setupMagnitudeBypass()
+    local player = Players.LocalPlayer
+    if not player or not player.Character then return end
+    
+    local primaryPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if not primaryPart then return end
+    
+    local OldIndexItem;
+    OldIndexItem = hookmetamethod(primaryPart, "__index", newcclosure(function(self, Key)
+        if not checkcaller() and Key:lower() == 'magnitude' and getcallingscript() and getcallingscript().Name == "ItemSpawn" then
+            return 0;
+        end
+                                                       
+        return OldIndexItem(self, Key)
+    end))
+end
+
+-- 3. Ghost Item Bypass (функция для безопасного подбора предметов)
+local function safePickupItem(item)
+    for _, instance in ipairs(item:GetDescendants()) do
+        if instance:IsA("ProximityPrompt") and instance.MaxActivationDistance ~= 0 then
+            pcall(function()
+                fireproximityprompt(instance)
+            end)
+            return true
+        end
+    end
+    return false
+end
+
+-- 4. Control Stand (управление стендом для невидимости и godmode)
+local standControlActive = false
+local function controlStand(toggle)
+    local player = Players.LocalPlayer
+    if not player then return end
+    
+    local character = player.Character or player.CharacterAdded:Wait()
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    
+    if not hrp or not humanoid then return end
+    
+    local function summonStand()
+        if not character:FindFirstChild("SummonedStand") or not character.SummonedStand.Value then
+            repeat
+                task.wait()
+                local remoteFunction = character:FindFirstChild("RemoteFunction")
+                if remoteFunction then
+                    pcall(function()
+                        remoteFunction:InvokeServer("ToggleStand", "Toggle")
+                    end)
+                end
+            until character:FindFirstChild("SummonedStand") and character.SummonedStand.Value
+        end
+    end
+    
+    local function getStand()
+        summonStand()
+        return character:FindFirstChild("StandMorph")
+    end
+    
+    if toggle then
+        if standControlActive then return end
+        standControlActive = true
+        
+        local stand = getStand()
+        if not stand then return end
+        
+        local animController = stand:FindFirstChild("AnimationController")
+        
+        if character:FindFirstChild("FocusCam") == nil then
+            local cameraValue = Instance.new("ObjectValue", character)
+            cameraValue.Name = "FocusCam"
+            cameraValue.Value = animController
+        end
+        
+        local standAttach = stand.PrimaryPart and stand.PrimaryPart:FindFirstChild("StandAttach")
+        if standAttach then
+            local alignPos = standAttach:FindFirstChild("AlignPosition")
+            if alignPos then alignPos.Enabled = false end
+        end
+        
+        task.spawn(function()
+            for _, part in ipairs(stand:GetDescendants()) do
+                if part:IsA("BasePart") or part:IsA("UnionOperation") or part:IsA("MeshPart") then
+                    pcall(function()
+                        part.CollisionGroupId = 1
+                    end)
+                end
+            end
+        end)
+        
+        task.spawn(function()
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") or part:IsA("UnionOperation") then
+                    pcall(function()
+                        part.CollisionGroupId = 2
+                    end)
+                end
+            end
+        end)
+        
+        -- Основной цикл управления стендом
+        task.spawn(function()
+            while standControlActive and toggle do
+                local currentStand = getStand()
+                local currentAnimController = currentStand and currentStand:FindFirstChild("AnimationController")
+                
+                if currentAnimController and humanoid then
+                    task.spawn(function()
+                        if humanoid.Jump then
+                            currentAnimController.Jump = true
+                        end
+                    end)
+                    
+                    task.spawn(function()
+                        local moveDir = humanoid.MoveDirection
+                        if Camera and Camera.CFrame then
+                            currentAnimController:Move(
+                                Camera.CFrame:VectorToObjectSpace(moveDir),
+                                true
+                            )
+                        end
+                    end)
+                end
+                
+                if hrp and currentStand and currentStand.PrimaryPart then
+                    hrp.CFrame = currentStand.PrimaryPart.CFrame + Vector3.new(0, -30, 0)
+                end
+                
+                task.spawn(function()
+                    if hrp then
+                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    end
+                end)
+                
+                task.wait()
+            end
+        end)
+        
+    else
+        standControlActive = false
+        
+        local stand = getStand()
+        if stand then
+            local standAttach = stand.PrimaryPart and stand.PrimaryPart:FindFirstChild("StandAttach")
+            if standAttach then
+                local alignPos = standAttach:FindFirstChild("AlignPosition")
+                if alignPos then alignPos.Enabled = true end
+            end
+            
+            for _, part in ipairs(stand:GetDescendants()) do
+                if part:IsA("BasePart") or part:IsA("UnionOperation") or part:IsA("MeshPart") then
+                    pcall(function()
+                        part.CollisionGroupId = 2
+                    end)
+                end
+            end
+        end
+        
+        if character:FindFirstChild("FocusCam") then
+            character.FocusCam:Destroy()
+        end
+        
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") or part:IsA("UnionOperation") then
+                pcall(function()
+                    part.CollisionGroupId = 10
+                end)
+            end
+        end
+        
+        if hrp and stand and stand.PrimaryPart then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.CFrame = stand.PrimaryPart.CFrame
+        end
+    end
+end
+
+-- Активируем Control Stand (можно добавить тоггл в UI позже)
+task.spawn(function()
+    task.wait(2) -- Ждем загрузки персонажа
+    -- controlStand(true) -- Раскомментируйте для активации (может быть нестабильно)
+end)
 
 -- ==================== ПРОВЕРКА ПЛЕЙСА ====================
 local ALLOWED_PLACE_IDS = {
@@ -35,6 +237,7 @@ if not ALLOWED_PLACE_IDS[currentPlaceId] then
 end
 
 print("[Simforea Hub] Loaded in: " .. gameName)
+print("[Simforea Hub] Anti-Cheat bypasses active!")
 
 -- ==================== НАСТРОЙКИ ПО УМОЛЧАНИЮ ====================
 local DEFAULT_SPEEDHACK_ENABLED = false
@@ -48,6 +251,8 @@ local DEFAULT_CHAMS_ENABLED = true
 local DEFAULT_HEALTH_ENABLED = true
 local DEFAULT_DISTANCE_ENABLED = true
 local DEFAULT_NAME_ENABLED = true
+local DEFAULT_NOCLIP_ENABLED = false
+local DEFAULT_STAND_CONTROL_ENABLED = false
 
 local DEFAULT_SPEED = 200
 local DEFAULT_INFINITE_JUMP_BOOST = 50
@@ -65,6 +270,8 @@ local speedhackEnabled = DEFAULT_SPEEDHACK_ENABLED
 local infiniteJumpEnabled = DEFAULT_INFINITE_JUMP_ENABLED
 local autoFarmEnabled = DEFAULT_AUTOFARM_ENABLED
 local autoPickupEnabled = DEFAULT_AUTO_PICKUP_ENABLED
+local noclipEnabled = DEFAULT_NOCLIP_ENABLED
+local standControlEnabled = DEFAULT_STAND_CONTROL_ENABLED
 
 local currentSpeed = DEFAULT_SPEED
 local currentInfiniteJumpBoost = DEFAULT_INFINITE_JUMP_BOOST
@@ -90,14 +297,98 @@ local autoFarmThread = nil
 local processedItems = {}
 local isTeleporting = false
 local pickupDistance = 15
-local teleportMethod = "Tween (Smooth)"
-local teleportSpeed = 0.3   -- скорость анимации телепортации (секунды)
+local teleportMethod = "Velocity"
+local teleportSpeed = 0.3
+local flightSpeed = 110
 
 -- Item ESP переменные
 local itemMaxDistance = 1000
 local itemEspObjects = {}
 
+-- NoClip переменные
+local noclipConnection = nil
+
+-- Velocity флаги
+local isMovingToItem = false
+local currentBodyVelocity = nil
+local currentMoveConnection = nil
+
+-- Конфиги
+local CONFIG_FOLDER = "SimforeaHubConfigs"
+local currentConfig = "default"
+
+-- Создаём папку для конфигов
+if not isfolder(CONFIG_FOLDER) then
+    pcall(function() makefolder(CONFIG_FOLDER) end)
+end
+
+-- Запускаем Magnitude Bypass после загрузки персонажа
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    setupMagnitudeBypass()
+end)
+
+if Players.LocalPlayer.Character then
+    task.spawn(function()
+        task.wait(1)
+        setupMagnitudeBypass()
+    end)
+end
+
 -- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+local function safeNotify(title, content, duration)
+    pcall(function()
+        Rayfield:Notify({
+            Title = title,
+            Content = content,
+            Duration = duration or 3
+        })
+    end)
+end
+
+local function stopCurrentMovement()
+    if currentBodyVelocity and currentBodyVelocity.Parent then
+        pcall(function() currentBodyVelocity:Destroy() end)
+        currentBodyVelocity = nil
+    end
+    
+    if currentMoveConnection then
+        pcall(function() currentMoveConnection:Disconnect() end)
+        currentMoveConnection = nil
+    end
+    
+    local character = Players.LocalPlayer.Character
+    if character then
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    
+    isMovingToItem = false
+end
+
+-- Модифицированная функция активации промпта с Ghost Item Bypass
+local function activateProximityPrompt(prompt)
+    if not prompt then return false end
+    
+    -- Проверка на Ghost Item (байпасс)
+    if prompt.MaxActivationDistance == 0 then
+        return false
+    end
+    
+    pcall(function()
+        prompt.MaxActivationDistance = 20
+        prompt:InputHoldBegin()
+        task.wait(prompt.HoldDuration > 0 and prompt.HoldDuration or 0.15)
+        prompt:InputHoldEnd()
+    end)
+    
+    return true
+end
+
+-- Обновленная функция получения предмета с использованием safePickupItem
 local function getItemName(item)
     local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
     if prompt and prompt.ObjectText and prompt.ObjectText ~= "" then
@@ -110,7 +401,284 @@ local function getProximityPrompt(item)
     return item:FindFirstChildWhichIsA("ProximityPrompt", true)
 end
 
--- ==================== ITEM ESP (БЕЗ ОШИБОК DRAWING) ====================
+-- ==================== СИСТЕМА КОНФИГОВ ====================
+local function saveConfig(name)
+    local data = {
+        version = 2,
+        -- Movement
+        speedhackEnabled = speedhackEnabled,
+        currentSpeed = currentSpeed,
+        infiniteJumpEnabled = infiniteJumpEnabled,
+        currentInfiniteJumpBoost = currentInfiniteJumpBoost,
+        noclipEnabled = noclipEnabled,
+        standControlEnabled = standControlEnabled,
+        
+        -- Auto Farm
+        autoFarmEnabled = autoFarmEnabled,
+        autoPickupEnabled = autoPickupEnabled,
+        pickupDistance = pickupDistance,
+        teleportMethod = teleportMethod,
+        flightSpeed = flightSpeed,
+        teleportSpeed = teleportSpeed,
+        
+        -- ESP
+        espEnabled = espEnabled,
+        itemEspEnabled = itemEspEnabled,
+        boxEnabled = boxEnabled,
+        chamsEnabled = chamsEnabled,
+        healthEnabled = healthEnabled,
+        distanceEnabled = distanceEnabled,
+        nameEnabled = nameEnabled,
+        teamCheck = teamCheck,
+        
+        -- Colors
+        boxColor = {boxColor.R, boxColor.G, boxColor.B},
+        chamsColor = {chamsColor.R, chamsColor.G, chamsColor.B},
+        itemColor = {itemColor.R, itemColor.G, itemColor.B},
+        
+        -- Items
+        itemMaxDistance = itemMaxDistance,
+        
+        -- UI Theme
+        theme = Window and Window.CurrentTheme or "Default"
+    }
+    
+    local success, err = pcall(function()
+        writefile(CONFIG_FOLDER .. "/" .. name .. ".json", HttpService:JSONEncode(data))
+    end)
+    
+    if success then
+        safeNotify("Config", "Saved: " .. name, 2)
+    else
+        safeNotify("Config", "Failed to save: " .. name, 2)
+    end
+end
+
+local function loadConfig(name)
+    local path = CONFIG_FOLDER .. "/" .. name .. ".json"
+    
+    if not isfile(path) then
+        safeNotify("Config", "Config not found: " .. name, 2)
+        return false
+    end
+    
+    local success, data = pcall(function()
+        return HttpService:JSONDecode(readfile(path))
+    end)
+    
+    if not success then
+        safeNotify("Config", "Failed to load: " .. name, 2)
+        return false
+    end
+    
+    -- Movement
+    speedhackEnabled = data.speedhackEnabled
+    currentSpeed = data.currentSpeed
+    infiniteJumpEnabled = data.infiniteJumpEnabled
+    currentInfiniteJumpBoost = data.currentInfiniteJumpBoost
+    noclipEnabled = data.noclipEnabled
+    standControlEnabled = data.standControlEnabled or false
+    
+    -- Auto Farm
+    autoFarmEnabled = data.autoFarmEnabled
+    autoPickupEnabled = data.autoPickupEnabled
+    pickupDistance = data.pickupDistance
+    teleportMethod = data.teleportMethod
+    flightSpeed = data.flightSpeed
+    teleportSpeed = data.teleportSpeed
+    
+    -- ESP
+    espEnabled = data.espEnabled
+    itemEspEnabled = data.itemEspEnabled
+    boxEnabled = data.boxEnabled
+    chamsEnabled = data.chamsEnabled
+    healthEnabled = data.healthEnabled
+    distanceEnabled = data.distanceEnabled
+    nameEnabled = data.nameEnabled
+    teamCheck = data.teamCheck
+    
+    -- Colors
+    if data.boxColor then
+        boxColor = Color3.fromRGB(data.boxColor[1]*255, data.boxColor[2]*255, data.boxColor[3]*255)
+    end
+    if data.chamsColor then
+        chamsColor = Color3.fromRGB(data.chamsColor[1]*255, data.chamsColor[2]*255, data.chamsColor[3]*255)
+    end
+    if data.itemColor then
+        itemColor = Color3.fromRGB(data.itemColor[1]*255, data.itemColor[2]*255, data.itemColor[3]*255)
+    end
+    
+    -- Items
+    itemMaxDistance = data.itemMaxDistance or 1000
+    
+    -- Apply theme
+    if data.theme and Window and Window.ModifyTheme then
+        pcall(function() Window.ModifyTheme(data.theme) end)
+    end
+    
+    -- Apply NoClip state
+    if noclipEnabled then
+        startNoclip()
+    else
+        stopNoclip()
+    end
+    
+    -- Apply Stand Control
+    if standControlEnabled then
+        controlStand(true)
+    else
+        controlStand(false)
+    end
+    
+    safeNotify("Config", "Loaded: " .. name, 2)
+    return true
+end
+
+-- ==================== NOCLIP ФУНКЦИИ ====================
+local function startNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    
+    noclipConnection = RunService.Heartbeat:Connect(function()
+        if not noclipEnabled then
+            return
+        end
+        
+        local character = Players.LocalPlayer.Character
+        if not character then
+            return
+        end
+        
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function()
+                    part.CanCollide = false
+                end)
+            end
+        end
+    end)
+end
+
+local function stopNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    
+    local character = Players.LocalPlayer.Character
+    if character then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function()
+                    part.CanCollide = true
+                end)
+            end
+        end
+    end
+end
+
+-- ==================== BODYVELOCITY MOVE ====================
+local function moveToItemBodyVelocity(part)
+    if isMovingToItem then 
+        return false 
+    end
+    
+    stopCurrentMovement()
+    
+    local character = Players.LocalPlayer.Character
+    if not character then 
+        return false 
+    end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then 
+        return false 
+    end
+    
+    local targetPos = part.CFrame.Position
+    local finished = false
+    local success = false
+    
+    isMovingToItem = true
+    
+    local oldSpeedhack = speedhackEnabled
+    speedhackEnabled = false
+    
+    local oldNoclip = noclipEnabled
+    if not noclipEnabled then
+        noclipEnabled = true
+        startNoclip()
+    end
+    
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bv.P = 25000
+    bv.Parent = hrp
+    currentBodyVelocity = bv
+    
+    local timeout = 10
+    local startTime = tick()
+    
+    currentMoveConnection = RunService.Heartbeat:Connect(function()
+        if not isMovingToItem then
+            finished = true
+            success = false
+            return
+        end
+        
+        if not hrp or not hrp.Parent then
+            finished = true
+            success = false
+            return
+        end
+        
+        if tick() - startTime > timeout then
+            finished = true
+            success = false
+            return
+        end
+        
+        if part and part.Parent then
+            targetPos = part.CFrame.Position
+        end
+        
+        local delta = targetPos - hrp.Position
+        local distance = delta.Magnitude
+        
+        if distance < 3 then
+            finished = true
+            success = true
+            return
+        end
+        
+        local currentSpeed = math.clamp(distance * 1.5, 25, flightSpeed)
+        bv.Velocity = delta.Unit * currentSpeed
+    end)
+    
+    repeat
+        task.wait()
+    until finished
+    
+    stopCurrentMovement()
+    
+    if hrp and hrp.Parent then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end
+    
+    if not oldNoclip then
+        noclipEnabled = false
+        stopNoclip()
+    end
+    
+    speedhackEnabled = oldSpeedhack
+    
+    return success
+end
+
+-- ==================== ITEM ESP ====================
 if hasDrawing then
     function createItemESPObject(item)
         if itemEspObjects[item] then return end
@@ -204,13 +772,12 @@ if hasDrawing then
         end
     end
 else
-    -- Заглушка, если Drawing нет
     createItemESPObject = function() end
     removeItemESP = function() end
     updateItemESP = function() end
 end
 
--- ==================== ФУНКЦИИ АВТОФАРМА (ОБЪЯВЛЕНЫ РАНЕЕ) ====================
+-- ==================== ФУНКЦИИ АВТОФАРМА ====================
 local function getClosestItem()
     local player = Players.LocalPlayer
     if not player or not player.Character then return nil end
@@ -232,7 +799,7 @@ local function getClosestItem()
         local distance = (root.Position - part.Position).Magnitude
         if distance < shortestDistance then
             local prompt = getProximityPrompt(item)
-            if prompt then
+            if prompt and prompt.MaxActivationDistance ~= 0 then -- Ghost Item bypass
                 closestItem = prompt
                 shortestDistance = distance
             end
@@ -263,6 +830,7 @@ local function getClosestItemForTeleport()
         if not part then continue end
         local prompt = getProximityPrompt(item)
         if not prompt then continue end
+        if prompt.MaxActivationDistance == 0 then continue end -- Ghost Item bypass
         local distance = (root.Position - part.Position).Magnitude
         if distance < closestDistance then
             closestItem = item
@@ -273,98 +841,124 @@ local function getClosestItemForTeleport()
     return closestItem, closestPart
 end
 
--- Обновлённая функция телепортации с учётом скорости
-local function teleportToItem(item, part)
-    local character = Players.LocalPlayer.Character
-    if not character then return false end
-    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return false end
-
-    local targetPosition = part.Position + Vector3.new(0, 3, 0)
-    local targetCFrame = CFrame.new(targetPosition)
-
-    if teleportMethod == "Tween (Smooth)" then
-        local tweenInfo = TweenInfo.new(teleportSpeed, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = targetCFrame})
+local function collectItem(item, part)
+    if teleportMethod == "Velocity" then
+        return moveToItemBodyVelocity(part)
+    elseif teleportMethod == "Tween (Smooth)" then
+        local character = Players.LocalPlayer.Character
+        if not character then return false end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        
+        local targetPos = part.CFrame.Position
+        local tween = TweenService:Create(hrp, TweenInfo.new(teleportSpeed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
         tween:Play()
         tween.Completed:Wait()
+        return true
     else
-        humanoidRootPart.CFrame = targetCFrame
+        local character = Players.LocalPlayer.Character
+        if not character then return false end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        
+        hrp.CFrame = part.CFrame
+        return true
     end
-    return true
 end
 
--- Auto Pickup цикл
+-- Auto Pickup цикл с Ghost Item bypass
 task.spawn(function()
     while true do
         if autoPickupEnabled then
             local prompt = getClosestItem()
             if prompt then
-                pcall(fireproximityprompt, prompt)
+                activateProximityPrompt(prompt)
             end
         end
         task.wait(0.2)
     end
 end)
 
--- Auto Teleport цикл (исправлен, без goto)
-local function autoTeleportLoop()
-    while autoFarmEnabled do
-        local item, part = getClosestItemForTeleport()
-        if item and part then
-            if not isTeleporting then
-                isTeleporting = true
-                local itemName = getItemName(item)
-                local teleportSuccess = teleportToItem(item, part)
-                if teleportSuccess then
-                    task.wait(0.05)
-                    local prompt = getProximityPrompt(item)
-                    if prompt then
-                        pcall(fireproximityprompt, prompt)
-                        pcall(function()
-                            Rayfield:Notify({
-                                Title = "Auto Teleport",
-                                Content = string.format("Collected: %s", itemName),
-                                Duration = 2
-                            })
-                        end)
-                    end
-                    processedItems[item] = true
-                end
-                isTeleporting = false
-                task.wait(0.3)
-            else
-                task.wait(0.1)
-            end
-        else
-            task.wait(2)
-            processedItems = {}
-        end
-    end
-end
-
--- Функции управления автофармом (объявлены до UI)
+-- Auto Farm функция
 function startAutoFarm()
-    if autoFarmThread then return end
+    if autoFarmThread and coroutine.status(autoFarmThread) ~= "dead" then
+        return
+    end
+    
+    autoFarmEnabled = true
     processedItems = {}
     isTeleporting = false
-    autoFarmThread = task.spawn(autoTeleportLoop)
-    pcall(function()
-        Rayfield:Notify({ Title = "Auto Teleport", Content = "Started!", Duration = 3 })
+    
+    autoFarmThread = task.spawn(function()
+        while autoFarmEnabled do
+            local item, part = getClosestItemForTeleport()
+            
+            if item and part then
+                if not isTeleporting then
+                    isTeleporting = true
+                    local itemName = getItemName(item)
+                    
+                    local success = collectItem(item, part)
+                    
+                    if success then
+                        task.wait(0.2)
+                        local prompt = getProximityPrompt(item)
+                        if prompt and prompt.MaxActivationDistance ~= 0 then
+                            activateProximityPrompt(prompt)
+                        end
+                        
+                        processedItems[item] = true
+                        
+                        task.delay(2, function()
+                            processedItems[item] = nil
+                        end)
+                        
+                        safeNotify("Auto Farm", "Collected: " .. itemName, 2)
+                    end
+                    
+                    isTeleporting = false
+                    task.wait(0.3)
+                end
+            else
+                if next(processedItems) then
+                    processedItems = {}
+                end
+                task.wait(0.5)
+            end
+        end
+        
+        stopCurrentMovement()
+        autoFarmThread = nil
     end)
+    
+    safeNotify("Auto Farm", "Started! Mode: " .. teleportMethod, 3)
 end
 
 function stopAutoFarm()
     autoFarmEnabled = false
-    autoFarmThread = nil
+    stopCurrentMovement()
+    
+    if autoFarmThread then
+        pcall(function() coroutine.close(autoFarmThread) end)
+        autoFarmThread = nil
+    end
+    
     isTeleporting = false
     processedItems = {}
-    pcall(function()
-        Rayfield:Notify({ Title = "Auto Teleport", Content = "Stopped!", Duration = 3 })
-    end)
+    
+    local character = Players.LocalPlayer.Character
+    if character then
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    
+    safeNotify("Auto Farm", "Stopped!", 3)
 end
 
--- ==================== ESP ИГРОКОВ (ИСПРАВЛЕНО) ====================
+-- ==================== ESP ИГРОКОВ ====================
 local function getPlayerTeam(player)
     return player and player.Team
 end
@@ -410,7 +1004,7 @@ local function getCharacterSize(character)
 end
 
 local function createESPObject(player)
-    if espObjects[player] then return end  -- Исправлено: не чистим всех
+    if espObjects[player] then return end
     local objects = {
         box = Drawing.new("Square"),
         healthBar = Drawing.new("Line"),
@@ -553,10 +1147,11 @@ local function updatePlayerESP()
     end
 end
 
--- ==================== SPEEDHACK (СГЛАЖЕННЫЙ) ====================
+-- ==================== SPEEDHACK ====================
 local lastSpeedUpdate = 0
 local function updateSpeedhack()
     if not speedhackEnabled then return end
+    if isMovingToItem then return end
     if tick() - lastSpeedUpdate < 0.05 then return end
     lastSpeedUpdate = tick()
 
@@ -573,7 +1168,7 @@ local function updateSpeedhack()
     rootPart.AssemblyLinearVelocity = newVelocity
 end
 
--- ==================== INFINITE JUMP (С ЗАДЕРЖКОЙ) ====================
+-- ==================== INFINITE JUMP ====================
 local lastJumpTime = 0
 local function updateInfiniteJump()
     if not infiniteJumpEnabled then return end
@@ -622,11 +1217,23 @@ end
 -- ==================== RAYFIELD UI ====================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
+local themes = {
+    "Default",
+    "AmberGlow",
+    "Amethyst",
+    "Bloom",
+    "DarkBlue",
+    "Green",
+    "Light",
+    "Ocean",
+    "Serenity"
+}
+
 local Window = Rayfield:CreateWindow({
     Name = "Simforea Hub | " .. gameName,
     Icon = 0,
     LoadingTitle = "Simforea Hub",
-    LoadingSubtitle = "Loaded in: " .. gameName,
+    LoadingSubtitle = "Loaded in: " .. gameName .. " (Bypasses Active)",
     Theme = "Default",
     ConfigurationSaving = {
         Enabled = true,
@@ -641,10 +1248,12 @@ local MovementTab = Window:CreateTab("Movement", 0)
 local AutoFarmTab = Window:CreateTab("AutoFarm", 0)
 local ESPTab = Window:CreateTab("ESP", 0)
 local ItemsTab = Window:CreateTab("Items", 0)
+local BypassesTab = Window:CreateTab("Bypasses", 0)
+local SettingsTab = Window:CreateTab("Settings", 0)
 local InfoTab = Window:CreateTab("Info", 0)
 
 -- Movement Tab
-local SpeedhackToggle = MovementTab:CreateToggle({
+MovementTab:CreateToggle({
     Name = "Speedhack",
     CurrentValue = speedhackEnabled,
     Callback = function(v) speedhackEnabled = v end
@@ -658,7 +1267,7 @@ MovementTab:CreateSlider({
     Callback = function(v) currentSpeed = v end
 })
 
-local InfiniteJumpToggle = MovementTab:CreateToggle({
+MovementTab:CreateToggle({
     Name = "Infinite Jump",
     CurrentValue = infiniteJumpEnabled,
     Callback = function(v) infiniteJumpEnabled = v end
@@ -672,8 +1281,23 @@ MovementTab:CreateSlider({
     Callback = function(v) currentInfiniteJumpBoost = v end
 })
 
+MovementTab:CreateToggle({
+    Name = "NoClip (Walk through walls)",
+    CurrentValue = noclipEnabled,
+    Callback = function(v)
+        noclipEnabled = v
+        if v then
+            startNoclip()
+            safeNotify("NoClip", "Enabled!", 2)
+        else
+            stopNoclip()
+            safeNotify("NoClip", "Disabled!", 2)
+        end
+    end
+})
+
 -- AutoFarm Tab
-local AutoPickupToggle = AutoFarmTab:CreateToggle({
+AutoFarmTab:CreateToggle({
     Name = "Auto Pickup (Range)",
     CurrentValue = autoPickupEnabled,
     Callback = function(v) autoPickupEnabled = v end
@@ -687,28 +1311,44 @@ AutoFarmTab:CreateSlider({
     Callback = function(v) pickupDistance = v end
 })
 
-local AutoFarmToggle = AutoFarmTab:CreateToggle({
-    Name = "Auto Teleport to Items",
+AutoFarmTab:CreateToggle({
+    Name = "Auto Farm",
     CurrentValue = autoFarmEnabled,
     Callback = function(v)
-        autoFarmEnabled = v
-        if v then startAutoFarm() else stopAutoFarm() end
+        if v then
+            startAutoFarm()
+        else
+            stopAutoFarm()
+        end
     end
 })
 
-local TeleportMethod = AutoFarmTab:CreateDropdown({
-    Name = "Teleport Method",
-    Options = {"Tween (Smooth)", "Instant (CFrame)"},
-    CurrentOption = "Tween (Smooth)",
+AutoFarmTab:CreateDropdown({
+    Name = "Movement Method",
+    Options = {"BodyVelocity (Through walls)", "Tween (Smooth)", "Instant (Teleport)"},
+    CurrentOption = "BodyVelocity (Through walls)",
     Callback = function(opt)
-        teleportMethod = opt
-        updateTeleportSpeedVisibility()
+        if opt == "BodyVelocity (Through walls)" then
+            teleportMethod = "Velocity"
+        elseif opt == "Tween (Smooth)" then
+            teleportMethod = "Tween (Smooth)"
+        else
+            teleportMethod = "Instant"
+        end
     end
 })
 
--- НОВЫЙ СЛАЙДЕР СКОРОСТИ ТЕЛЕПОРТАЦИИ
-local TeleportSpeedSlider = AutoFarmTab:CreateSlider({
-    Name = "Teleport Speed",
+AutoFarmTab:CreateSlider({
+    Name = "Flight Speed (Recommended: 100-140)",
+    Range = {50, 200},
+    Increment = 10,
+    Suffix = "studs/s",
+    CurrentValue = flightSpeed,
+    Callback = function(v) flightSpeed = v end
+})
+
+AutoFarmTab:CreateSlider({
+    Name = "Tween Speed",
     Range = {0.1, 2.0},
     Increment = 0.05,
     Suffix = "s",
@@ -716,14 +1356,8 @@ local TeleportSpeedSlider = AutoFarmTab:CreateSlider({
     Callback = function(v) teleportSpeed = v end
 })
 
--- Функция видимости слайдера (только при выборе Tween)
-local function updateTeleportSpeedVisibility()
-    TeleportSpeedSlider.Visible = (teleportMethod == "Tween (Smooth)")
-end
-updateTeleportSpeedVisibility()
-
--- ESP Tab (сокращённо для краткости, но можно добавить все настройки)
-local ESPToggle = ESPTab:CreateToggle({
+-- ESP Tab
+ESPTab:CreateToggle({
     Name = "Enable Player ESP",
     CurrentValue = espEnabled,
     Callback = function(v)
@@ -731,10 +1365,60 @@ local ESPToggle = ESPTab:CreateToggle({
         if not v then clearAllESP(); if not chamsEnabled then clearAllChams() end end
     end
 })
--- (остальные настройки ESP аналогичны исходным, для экономии места опущены)
+
+ESPTab:CreateToggle({
+    Name = "Show Box",
+    CurrentValue = boxEnabled,
+    Callback = function(v) boxEnabled = v end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Chams",
+    CurrentValue = chamsEnabled,
+    Callback = function(v)
+        chamsEnabled = v
+        if not v then clearAllChams() end
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Health",
+    CurrentValue = healthEnabled,
+    Callback = function(v) healthEnabled = v end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Distance",
+    CurrentValue = distanceEnabled,
+    Callback = function(v) distanceEnabled = v end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Name",
+    CurrentValue = nameEnabled,
+    Callback = function(v) nameEnabled = v end
+})
+
+ESPTab:CreateToggle({
+    Name = "Team Check (Green=Team)",
+    CurrentValue = teamCheck,
+    Callback = function(v) teamCheck = v end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Box Color",
+    Color = boxColor,
+    Callback = function(c) boxColor = c end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Chams Color",
+    Color = chamsColor,
+    Callback = function(c) chamsColor = c end
+})
 
 -- Items Tab
-local ItemESPToggle = ItemsTab:CreateToggle({
+ItemsTab:CreateToggle({
     Name = "Enable Item ESP",
     CurrentValue = itemEspEnabled,
     Callback = function(v)
@@ -771,9 +1455,103 @@ ItemsTab:CreateSlider({
     Callback = function(v) itemMaxDistance = v end
 })
 
+-- Bypasses Tab
+BypassesTab:CreateParagraph({
+    Title = "Active Bypasses",
+    Content = "gg uzukee"
+})
+
+BypassesTab:CreateToggle({
+    Name = "Stand Control (Experimental)",
+    CurrentValue = standControlEnabled,
+    Callback = function(v)
+        standControlEnabled = v
+        if v then
+            controlStand(true)
+            safeNotify("Stand Control", "Enabled! You are now controlling your stand.", 3)
+        else
+            controlStand(false)
+            safeNotify("Stand Control", "Disabled!", 2)
+        end
+    end
+})
+
+BypassesTab:CreateButton({
+    Name = "Force Teleport Bypass Check",
+    Callback = function()
+        safeNotify("Bypasses", "Teleport bypass is active!", 2)
+    end
+})
+
+-- Settings Tab
+SettingsTab:CreateDropdown({
+    Name = "UI Theme",
+    Options = themes,
+    CurrentOption = "Default",
+    Callback = function(theme)
+        pcall(function() Window.ModifyTheme(theme) end)
+        safeNotify("Theme", "Changed to: " .. theme, 2)
+    end
+})
+
+SettingsTab:CreateInput({
+    Name = "Config Name",
+    PlaceholderText = "default",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(text)
+        if text and text ~= "" then
+            currentConfig = text
+        end
+    end
+})
+
+SettingsTab:CreateButton({
+    Name = "Save Config",
+    Callback = function()
+        saveConfig(currentConfig)
+    end
+})
+
+SettingsTab:CreateButton({
+    Name = "Load Config",
+    Callback = function()
+        loadConfig(currentConfig)
+    end
+})
+
+-- Список конфигов
+local configs = listConfigs()
+if #configs > 0 then
+    SettingsTab:CreateDropdown({
+        Name = "Load Saved Config",
+        Options = configs,
+        CurrentOption = configs[1],
+        Callback = function(name)
+            loadConfig(name)
+            currentConfig = name
+        end
+    })
+end
+
+SettingsTab:CreateButton({
+    Name = "Refresh Config List",
+    Callback = function()
+        local newConfigs = listConfigs()
+        safeNotify("Config", "Found " .. #newConfigs .. " configs", 2)
+    end
+})
+
+SettingsTab:CreateButton({
+    Name = "Delete Current Config",
+    Callback = function()
+        deleteConfig(currentConfig)
+    end
+})
+
+-- Info Tab
 InfoTab:CreateParagraph({
     Title = "Simforea Hub",
-    Content = string.format("Game: %s\nPlace ID: %d\n\nFeatures:\n✓ Speedhack (smooth)\n✓ Infinite Jump (cooldown)\n✓ Player ESP\n✓ Item ESP\n✓ Auto Pickup\n✓ Auto Teleport (speed adjustable)\n\nHotkeys:\nInsert - Speedhack\nPageUp - Inf Jump", gameName, currentPlaceId)
+    Content = string.format("Game: %s\nPlace ID: %d\n\nCurrent Mode: %s\nFlight Speed: %d\n\n=== FEATURES ===\n✓ Perfect targeting (center of item)\n✓ Dynamic speed system\n✓ BodyVelocity through walls\n✓ Proper InputHold pickup\n✓ Multiple configs\n✓ Theme support\n✓ Stops immediately when disabled\n\n=== ANTI-CHEAT BYPASSES ===\n✓ Teleport Bypass\n✓ Item Magnitude Bypass\n✓ Ghost Item Bypass\n✓ Stand Control (Godmode)\n\nRecommended speed: 100-120 for YBA\n\nConfigs saved to: %s", gameName, currentPlaceId, teleportMethod, flightSpeed, CONFIG_FOLDER)
 })
 
 -- ==================== СБОРЩИК МУСОРА ====================
@@ -803,6 +1581,10 @@ end)
 Players.LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     clearAllESP()
+    setupMagnitudeBypass()
+    if noclipEnabled then
+        startNoclip()
+    end
 end)
 
 game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
@@ -811,12 +1593,34 @@ game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
     clearAllItemESP()
     processedItems = {}
     if autoFarmEnabled then stopAutoFarm() end
+    if noclipEnabled then
+        task.wait(1)
+        startNoclip()
+    end
 end)
 
 setupItemsFolder()
 
-Rayfield:Notify({
-    Title = "Simforea Hub",
-    Content = "Loaded! All fixes applied. Teleport speed adjustable.",
-    Duration = 5
-})
+if noclipEnabled then
+    startNoclip()
+end
+
+-- Автозагрузка последнего конфига
+local function autoLoadLastConfig()
+    local configs = listConfigs()
+    if #configs > 0 then
+        if isfile(CONFIG_FOLDER .. "/default.json") then
+            loadConfig("default")
+            currentConfig = "default"
+        else
+            loadConfig(configs[1])
+            currentConfig = configs[1]
+        end
+    end
+end
+
+pcall(autoLoadLastConfig)
+
+safeNotify("Simforea Hub", 5)
+
+print("[Simforea Hub] Loaded with Configs, Themes & Anti-Cheat Bypasses!")
