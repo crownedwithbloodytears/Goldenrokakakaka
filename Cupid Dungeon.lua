@@ -1,4 +1,3 @@
--- Dungeon AutoFarm with Rayfield UI (Pure CFrame Flight - No Physics)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -6,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 local Camera = Workspace.CurrentCamera
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local PhysicsService = game:GetService("PhysicsService")
 
 -- ==================== ПРОВЕРКА ПЛЕЙСА ====================
 local ALLOWED_PLACE_IDS = {
@@ -56,27 +56,196 @@ if not ALLOWED_PLACE_IDS[currentPlaceId] then
 end
 
 print("[Simforea Hub] Script loaded successfully in: " .. gameName .. " (Place ID: " .. currentPlaceId .. ")")
+print("[Simforea Hub] Using HYBRID movement: Velocity + CFrame lock")
+print("[Simforea Hub] Statue HP detection via barrelHP active")
+
+-- ==================== ADVANCED NOCLIP (CollisionGroup) ====================
+local NOCLIP_GROUP = "SimforeaNoClip"
+
+pcall(function()
+    PhysicsService:CreateCollisionGroup(NOCLIP_GROUP)
+end)
+
+pcall(function()
+    PhysicsService:CollisionGroupSetCollidable(NOCLIP_GROUP, "Default", false)
+end)
+
+pcall(function()
+    PhysicsService:CollisionGroupSetCollidable(NOCLIP_GROUP, "Character", false)
+end)
+
+local noclipEnabled = false
+local noclipConnection = nil
+local characterAddedConnection = nil
+
+local function setPartCollisionGroup(part, group)
+    pcall(function()
+        if part:IsA("BasePart") then
+            PhysicsService:SetPartCollisionGroup(part, group)
+        end
+    end)
+end
+
+local function setCharacterCollisionGroup(character, group)
+    if not character then return end
+    
+    for _, obj in ipairs(character:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            setPartCollisionGroup(obj, group)
+        end
+    end
+end
+
+local function setupNoclipForNewParts(character)
+    if noclipConnection then
+        noclipConnection:Disconnect()
+    end
+    
+    noclipConnection = character.DescendantAdded:Connect(function(obj)
+        if noclipEnabled and obj:IsA("BasePart") then
+            setPartCollisionGroup(obj, NOCLIP_GROUP)
+        end
+    end)
+end
+
+local function setAdvancedNoclip(state)
+    noclipEnabled = state
+    
+    local player = Players.LocalPlayer
+    if not player then return end
+    
+    local character = player.Character
+    if not character then return end
+    
+    if state then
+        setCharacterCollisionGroup(character, NOCLIP_GROUP)
+        setupNoclipForNewParts(character)
+    else
+        setCharacterCollisionGroup(character, "Default")
+        
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+        end
+    end
+end
+
+local function onCharacterAdded(character)
+    task.wait(0.5)
+    
+    if noclipEnabled then
+        setCharacterCollisionGroup(character, NOCLIP_GROUP)
+        setupNoclipForNewParts(character)
+    end
+end
+
+if characterAddedConnection then
+    characterAddedConnection:Disconnect()
+end
+characterAddedConnection = Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+task.wait(0.5)
+if Players.LocalPlayer.Character then
+    onCharacterAdded(Players.LocalPlayer.Character)
+end
+
+-- ==================== УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ЭКИПИРОВКИ ОРУЖИЯ ====================
+local function equipBackWeapon()
+    local localPlayer = Players.LocalPlayer
+    
+    local playerCharacters = workspace:FindFirstChild("PlayerCharacters")
+    if not playerCharacters then
+        return false
+    end
+    
+    local characterModel = playerCharacters:FindFirstChild(localPlayer.Name)
+    if not characterModel then
+        return false
+    end
+    
+    local weaponFound = false
+    local weaponName = nil
+    
+    for _, obj in ipairs(characterModel:GetChildren()) do
+        if obj:IsA("Model") and string.find(obj.Name, "Back") then
+            weaponName = obj.Name:gsub("Back", ""):gsub("%s+", "")
+            weaponFound = true
+            break
+        end
+    end
+    
+    if not weaponFound or not weaponName then
+        return false
+    end
+    
+    local backpack = localPlayer:FindFirstChild("Backpack")
+    if not backpack then
+        return false
+    end
+    
+    local cleanedWeaponName = weaponName:lower()
+    
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            local cleanedToolName = tool.Name:gsub("%s+", ""):lower()
+            
+            if string.find(cleanedToolName, cleanedWeaponName) or 
+               string.find(cleanedWeaponName, cleanedToolName) then
+                tool.Parent = localPlayer.Character
+                task.wait(0.3)
+                return true
+            end
+        end
+    end
+    
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            tool.Parent = localPlayer.Character
+            task.wait(0.3)
+            return true
+        end
+    end
+    
+    return false
+end
 
 -- ==================== НАСТРОЙКИ ====================
-MOVE_SPEED = 45
-FLY_HEIGHT_OFFSET = 12
+-- Movement settings
+local speedhackEnabled = false
+local flyhackEnabled = false
+local infiniteJumpEnabled = false
+local currentSpeed = 200
+local currentFlySpeed = 60
+local currentFlyUpSpeed = 40
+local currentInfiniteJumpBoost = 50
+local MIN_SPEED = 50
+local MAX_SPEED = 500
+
+-- AutoFarm settings
+MOVE_SPEED = 75
+FLY_HEIGHT_OFFSET = 9.5
 WAYPOINT_ARRIVAL_DISTANCE = 5
+HOVER_PRECISION_DISTANCE = 3
 NPC_ARRIVAL_DISTANCE = 12
-AUTO_FARM_UPDATE_INTERVAL = 0.016 -- 60 FPS
+AUTO_FARM_UPDATE_INTERVAL = 0.016
 WAIT_FOR_NPC_INTERVAL = 0.1
-SPAWN_WAIT_TIMEOUT = 10
+SPAWN_WAIT_TIMEOUT = 5
 TIMEOUT_DURATION = 30
 DAMAGE_PER_ATTACK = 80
 TIME_BETWEEN_ATTACKS = 1 / 6
+UPWARD_DRIFT_COMPENSATION = 35
 
 -- Состояние
 local autoFarmEnabled = false
 local currentStage = 1
-local damageDealtToStatues = {0, 0, 0}
 local isFarming = false
 local lastAttackTime = 0
 local farmCoroutine = nil
 local skyWalkCoroutine = nil
+
+-- Таймеры для Cupid Queen
+local queenStatuePositionTimer = 0
+local lastQueenCheckTime = 0
 
 -- ==================== SKY WALK ФУНКЦИЯ ====================
 local function startSkyWalkLoop()
@@ -119,6 +288,69 @@ local function stopSkyWalkLoop()
     end
 end
 
+-- ==================== HYBRID MOVEMENT ФУНКЦИИ ====================
+
+local function stabilizeCharacter()
+    local character = Players.LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    rootPart.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function moveToPositionVelocity(targetPosition)
+    local character = Players.LocalPlayer.Character
+    if not character then return false end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local currentPosition = rootPart.Position
+    local offset = targetPosition - currentPosition
+    local distance = offset.Magnitude
+    
+    if distance <= WAYPOINT_ARRIVAL_DISTANCE then
+        rootPart.AssemblyLinearVelocity = Vector3.zero
+        return true
+    end
+    
+    local direction = offset.Unit
+    
+    rootPart.AssemblyLinearVelocity = direction * MOVE_SPEED + Vector3.new(0, UPWARD_DRIFT_COMPENSATION, 0)
+    
+    return false
+end
+
+local function lockAboveNPCVelocity(npc)
+    local character = Players.LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local npcRoot = npc:FindFirstChild("HumanoidRootPart")
+    
+    if not rootPart or not npcRoot then
+        return
+    end
+    
+    local targetPos = npcRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
+    local offset = targetPos - rootPart.Position
+    local distance = offset.Magnitude
+    
+    if distance > HOVER_PRECISION_DISTANCE then
+        rootPart.AssemblyLinearVelocity = offset.Unit * (MOVE_SPEED * 0.8) + Vector3.new(0, UPWARD_DRIFT_COMPENSATION, 0)
+    else
+        rootPart.AssemblyLinearVelocity = Vector3.new(0, UPWARD_DRIFT_COMPENSATION, 0)
+        
+        if distance > 1 then
+            rootPart.CFrame = CFrame.new(targetPos, npcRoot.Position)
+        end
+    end
+    
+    rootPart.CFrame = CFrame.lookAt(rootPart.Position, npcRoot.Position)
+end
+
 -- ==================== ТОЧКИ МАРШРУТА ====================
 local waypoints = {
     {
@@ -155,7 +387,7 @@ local waypoints = {
         index = 6,
         position = Vector3.new(-1069.45752, 435.074432, -2754.95044),
         action = "fight",
-        npcsToKill = {}
+        npcsToKill = {"Dungeon Attacker", "Dungeon Gun User", "Dungeon Sword User", "Cupid Queen's Guards"}
     },
     {
         index = 7,
@@ -187,20 +419,747 @@ local waypoints = {
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Simforea Hub | Dungeon AutoFarm",
+    Name = "Simforea Hub | " .. gameName,
     Icon = 0,
     LoadingTitle = "Simforea Hub",
-    LoadingSubtitle = "Dungeon AutoFarm | " .. gameName,
+    LoadingSubtitle = "HYBRID Movement + Dungeon AutoFarm | " .. gameName,
     Theme = "Default",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "SimforeaHub",
-        FileName = "DungeonSettings"
+        FileName = "Settings"
     },
     KeySystem = false
 })
 
--- ==================== sendNotification ====================
+-- ==================== ВКЛАДКИ UI ====================
+local MovementTab = Window:CreateTab("Movement", 0)
+local AutoFarmTab = Window:CreateTab("Dungeon AutoFarm", 0)
+local InfoTab = Window:CreateTab("Info", 0)
+
+-- ==================== MOVEMENT TAB ====================
+local SpeedhackSection = MovementTab:CreateSection("Speedhack")
+local SpeedhackToggle = MovementTab:CreateToggle({
+    Name = "Speedhack", CurrentValue = speedhackEnabled, Flag = "SpeedhackToggle",
+    Callback = function(Value) speedhackEnabled = Value end
+})
+
+local SpeedSlider = MovementTab:CreateSlider({
+    Name = "Speed Value", Range = {MIN_SPEED, MAX_SPEED}, Increment = 1, Suffix = "studs/s",
+    CurrentValue = currentSpeed, Flag = "SpeedSlider",
+    Callback = function(Value) currentSpeed = Value end
+})
+
+local FlyhackSection = MovementTab:CreateSection("Flyhack")
+local FlyhackToggle = MovementTab:CreateToggle({
+    Name = "Flyhack", CurrentValue = flyhackEnabled, Flag = "FlyhackToggle",
+    Callback = function(Value)
+        flyhackEnabled = Value
+        local character = Players.LocalPlayer.Character
+        if character and character:FindFirstChild("Humanoid") then
+            if Value then
+                character.Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+            end
+        end
+    end
+})
+
+local FlySpeedSlider = MovementTab:CreateSlider({
+    Name = "Fly Speed (Horizontal)", Range = {MIN_SPEED, MAX_SPEED}, Increment = 1, Suffix = "studs/s",
+    CurrentValue = currentFlySpeed, Flag = "FlySpeedSlider",
+    Callback = function(Value) currentFlySpeed = Value end
+})
+
+local FlyUpSpeedSlider = MovementTab:CreateSlider({
+    Name = "Fly Speed (Vertical)", Range = {MIN_SPEED, MAX_SPEED}, Increment = 1, Suffix = "studs/s",
+    CurrentValue = currentFlyUpSpeed, Flag = "FlyUpSpeedSlider",
+    Callback = function(Value) currentFlyUpSpeed = Value end
+})
+
+local InfiniteJumpSection = MovementTab:CreateSection("Infinite Jump")
+local InfiniteJumpToggle = MovementTab:CreateToggle({
+    Name = "Infinite Jump", CurrentValue = infiniteJumpEnabled, Flag = "InfiniteJumpToggle",
+    Callback = function(Value) infiniteJumpEnabled = Value end
+})
+
+local InfiniteJumpSlider = MovementTab:CreateSlider({
+    Name = "Jump Boost Power", Range = {10, 200}, Increment = 5, Suffix = "studs/s",
+    CurrentValue = currentInfiniteJumpBoost, Flag = "InfiniteJumpBoost",
+    Callback = function(Value) currentInfiniteJumpBoost = Value end
+})
+
+local NoclipSection = MovementTab:CreateSection("Advanced Noclip (CollisionGroup)")
+local NoclipToggle = MovementTab:CreateToggle({
+    Name = "Advanced Noclip (No Collision with Walls)", 
+    CurrentValue = noclipEnabled, 
+    Flag = "NoclipToggle",
+    Callback = function(Value)
+        setAdvancedNoclip(Value)
+    end
+})
+
+MovementTab:CreateParagraph({
+    Title = "⚠️ Movement & Anti-Cheat Info",
+    Content = "Movement System:\n" ..
+              "✓ Speedhack - Velocity based\n" ..
+              "✓ Flyhack - WASD + Space/Ctrl\n" ..
+              "✓ Infinite Jump - Boost based\n" ..
+              "✓ Advanced Noclip - CollisionGroup\n\n" ..
+              "AutoFarm Movement (HYBRID):\n" ..
+              "✓ Long distance: AssemblyLinearVelocity\n" ..
+              "✓ Close to NPC: Velocity + CFrame lock\n" ..
+              "✓ Gravity compensation (+35 Y velocity)\n" ..
+              "✓ Angular velocity always zero\n" ..
+              "✓ Much harder to detect than pure CFrame!\n\n" ..
+              "Hotkeys:\n" ..
+              "Insert - Speedhack | Home - Flyhack\n" ..
+              "PageUp - Infinite Jump | End - Noclip"
+})
+
+-- ==================== ФУНКЦИИ SPEEDHACK, FLYHACK И INFINITE JUMP ====================
+local function updateSpeedhack()
+    if autoFarmEnabled then return end
+    
+    if speedhackEnabled and not flyhackEnabled then
+        local player = Players.LocalPlayer
+        if not player then return end
+        
+        local character = player.Character
+        if not character then return end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not humanoid then return end
+        
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+        
+        local moveDirection = humanoid.MoveDirection
+        if moveDirection.Magnitude > 0.001 then
+            local currentVelocity = rootPart.AssemblyLinearVelocity
+            local newVelocity = (moveDirection.Unit * currentSpeed) + Vector3.new(0, currentVelocity.Y, 0)
+            rootPart.AssemblyLinearVelocity = newVelocity
+        end
+    end
+end
+
+local function updateFlyhack()
+    if autoFarmEnabled then return end
+    
+    if flyhackEnabled then
+        local player = Players.LocalPlayer
+        if not player then return end
+        
+        local character = player.Character
+        if not character then return end
+        
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+        
+        local camera = Workspace.CurrentCamera
+        if not camera then return end
+        
+        local moveVector = Vector3.zero
+        
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            moveVector = moveVector + Vector3.new(0, 0, -1)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            moveVector = moveVector + Vector3.new(0, 0, 1)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            moveVector = moveVector + Vector3.new(-1, 0, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            moveVector = moveVector + Vector3.new(1, 0, 0)
+        end
+        
+        if moveVector.Magnitude > 0 then
+            moveVector = moveVector.Unit
+        end
+        
+        local flyVelocity = camera.CFrame:VectorToWorldSpace(moveVector * currentFlySpeed)
+        
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            flyVelocity = flyVelocity + Vector3.new(0, currentFlyUpSpeed, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+            flyVelocity = flyVelocity + Vector3.new(0, -currentFlyUpSpeed, 0)
+        end
+        
+        rootPart.AssemblyLinearVelocity = flyVelocity
+    end
+end
+
+local function updateInfiniteJump()
+    if autoFarmEnabled then return end
+    
+    if infiniteJumpEnabled and not flyhackEnabled then
+        local player = Players.LocalPlayer
+        if not player then return end
+        
+        local character = player.Character
+        if not character then return end
+        
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+        
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            local currentVel = rootPart.AssemblyLinearVelocity
+            if currentVel.Y < 10 then
+                rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, currentInfiniteJumpBoost, currentVel.Z)
+            end
+        end
+    end
+end
+
+-- ==================== ФУНКЦИИ ДЛЯ СТАТУЙ С BARRELHP ====================
+
+local function getStatueHealth(statue)
+    local barrelHP = statue:FindFirstChild("barrelHP")
+    if barrelHP then
+        if barrelHP:IsA("NumberValue") or barrelHP:IsA("IntValue") then
+            return barrelHP.Value
+        end
+    end
+    return nil
+end
+
+local function isStatueDestroyed(statue)
+    local health = getStatueHealth(statue)
+    if health ~= nil then
+        return health <= 0
+    end
+    return true
+end
+
+local function areAllStatuesDestroyed()
+    local statuesFolder = Workspace:FindFirstChild("Env")
+    if not statuesFolder then
+        return true
+    end
+    
+    local statues = statuesFolder:FindFirstChild("Statues")
+    if not statues then
+        statues = statuesFolder
+    end
+    
+    local statueNames = {"Statue", "Statue2", "Statue3"}
+    
+    for _, name in ipairs(statueNames) do
+        local statue = statues:FindFirstChild(name)
+        if statue then
+            local health = getStatueHealth(statue)
+            if health ~= nil and health > 0 then
+                return false
+            end
+        end
+    end
+    
+    for _, child in ipairs(statues:GetChildren()) do
+        if child.Name:lower():find("statue") then
+            local health = getStatueHealth(child)
+            if health ~= nil and health > 0 then
+                return false
+            end
+        end
+    end
+    
+    return true
+end
+
+local function breakStatues()
+    sendNotification("Dungeon AutoFarm", "Checking statues...")
+    
+    local statuesFolder = Workspace:FindFirstChild("Env")
+    if not statuesFolder then
+        sendNotification("Dungeon AutoFarm", "Statues folder not found!")
+        return false
+    end
+    
+    local statues = statuesFolder:FindFirstChild("Statues")
+    if not statues then
+        statues = statuesFolder
+    end
+    
+    local statuesToBreak = {}
+    
+    local possibleStatues = {
+        statues:FindFirstChild("Statue3"),
+        statues:FindFirstChild("Statue"),
+        statues:FindFirstChild("Statue2"),
+    }
+    
+    for _, child in ipairs(statues:GetChildren()) do
+        if child.Name:lower():find("statue") then
+            table.insert(possibleStatues, child)
+        end
+    end
+    
+    for _, statue in ipairs(possibleStatues) do
+        if statue then
+            local health = getStatueHealth(statue)
+            if health ~= nil and health > 0 then
+                table.insert(statuesToBreak, {
+                    object = statue,
+                    health = health,
+                    name = statue.Name
+                })
+                sendNotification("Dungeon AutoFarm", string.format("Found statue: %s (HP: %d)", statue.Name, health))
+            elseif health ~= nil and health <= 0 then
+                sendNotification("Dungeon AutoFarm", string.format("Statue %s already destroyed (HP: %d)", statue.Name, health))
+            end
+        end
+    end
+    
+    if #statuesToBreak == 0 then
+        sendNotification("Dungeon AutoFarm", "No statues need to be broken!")
+        return true
+    end
+    
+    sendNotification("Dungeon AutoFarm", string.format("Breaking %d statues...", #statuesToBreak))
+    
+    for _, statueInfo in ipairs(statuesToBreak) do
+        if not autoFarmEnabled then return false end
+        
+        local statue = statueInfo.object
+        local statueName = statueInfo.name
+        
+        local statuePos = statue:GetPivot().Position
+        local targetPos = statuePos + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
+        
+        sendNotification("Dungeon AutoFarm", string.format("Moving to statue: %s (HP: %d)", statueName, statueInfo.health))
+        
+        local moveResult = false
+        repeat
+            if not autoFarmEnabled then break end
+            moveResult = moveToPositionVelocity(targetPos)
+            task.wait(AUTO_FARM_UPDATE_INTERVAL)
+        until moveResult == true
+        
+        if not autoFarmEnabled then return false end
+        
+        local lastHealth = statueInfo.health
+        local noDamageCount = 0
+        
+        while autoFarmEnabled do
+            local currentHealth = getStatueHealth(statue)
+            
+            if currentHealth == nil then
+                sendNotification("Dungeon AutoFarm", string.format("Statue %s destroyed!", statueName))
+                break
+            end
+            
+            if currentHealth <= 0 then
+                sendNotification("Dungeon AutoFarm", string.format("Statue %s destroyed! (HP: %d)", statueName, currentHealth))
+                break
+            end
+            
+            if lastHealth ~= currentHealth and math.floor(currentHealth) % 100 < 20 then
+                sendNotification("Dungeon AutoFarm", string.format("Statue %s HP: %d", statueName, currentHealth))
+                lastHealth = currentHealth
+                noDamageCount = 0
+            elseif lastHealth == currentHealth then
+                noDamageCount = noDamageCount + 1
+                if noDamageCount > 30 then
+                    sendNotification("Dungeon AutoFarm", string.format("No damage to %s, retrying position...", statueName))
+                    local character = Players.LocalPlayer.Character
+                    if character then
+                        local rootPart = character:FindFirstChild("HumanoidRootPart")
+                        if rootPart then
+                            rootPart.CFrame = CFrame.new(targetPos + Vector3.new(0, 5, 0), statuePos)
+                            task.wait(0.5)
+                            rootPart.CFrame = CFrame.new(targetPos, statuePos)
+                        end
+                    end
+                    noDamageCount = 0
+                end
+            end
+            
+            local character = Players.LocalPlayer.Character
+            if character then
+                local rootPart = character:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    rootPart.AssemblyLinearVelocity = Vector3.new(0, UPWARD_DRIFT_COMPENSATION, 0)
+                    rootPart.CFrame = CFrame.new(targetPos, statuePos)
+                end
+            end
+            
+            attack()
+            task.wait(TIME_BETWEEN_ATTACKS)
+        end
+    end
+    
+    sendNotification("Dungeon AutoFarm", "All statues destroyed!")
+    return true
+end
+
+-- ==================== ФУНКЦИИ ДЛЯ CUPID QUEEN (ИСПРАВЛЕНЫ) ====================
+
+local QUEEN_STATUE_POSITION = CFrame.new(
+    -1096.70984, 674.258972, -5201.3999,
+    -1, 0, 0,
+    0, 1, 0,
+    0, 0, -1
+)
+
+local function getCupidQueen()
+    local npcsFolder = Workspace:FindFirstChild("NPCs")
+    if not npcsFolder then
+        return nil
+    end
+    return npcsFolder:FindFirstChild("Cupid Queen")
+end
+
+local function getCupidQueenRealPos()
+    local cupidQueen = getCupidQueen()
+    if not cupidQueen then
+        return nil
+    end
+    
+    local realpos = cupidQueen:FindFirstChild("realpos")
+    if realpos then
+        if realpos:IsA("CFrameValue") then
+            return realpos.Value
+        elseif realpos:IsA("ObjectValue") and realpos.Value then
+            if realpos.Value:IsA("CFrame") then
+                return realpos.Value
+            end
+        end
+    end
+    
+    local rootPart = cupidQueen:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        return rootPart.CFrame
+    end
+    
+    return nil
+end
+
+local function isCupidQueenAlive()
+    local cupidQueen = getCupidQueen()
+    if not cupidQueen then
+        return false
+    end
+    
+    local humanoid = cupidQueen:FindFirstChild("Humanoid")
+    if not humanoid then
+        return false
+    end
+    
+    return humanoid.Health > 0
+end
+
+local function isCupidQueenAtStatuePosition()
+    local queenPos = getCupidQueenRealPos()
+    if not queenPos then
+        return false
+    end
+    
+    local pos1 = queenPos.Position
+    local pos2 = QUEEN_STATUE_POSITION.Position
+    
+    local distance = (pos1 - pos2).Magnitude
+    
+    return distance < 15
+end
+
+local function updateQueenPositionTimer()
+    local currentTime = tick()
+    local deltaTime = currentTime - lastQueenCheckTime
+    if lastQueenCheckTime == 0 then
+        lastQueenCheckTime = currentTime
+        return 0
+    end
+    lastQueenCheckTime = currentTime
+    
+    if isCupidQueenAtStatuePosition() then
+        queenStatuePositionTimer = queenStatuePositionTimer + deltaTime
+    else
+        queenStatuePositionTimer = 0
+    end
+    
+    return queenStatuePositionTimer
+end
+
+local function isQueenReadyForStatuePhase()
+    updateQueenPositionTimer()
+    return queenStatuePositionTimer >= 2
+end
+
+-- Исправленная основная функция боя с Cupid Queen
+local function fightCupidQueenWithPhases()
+    sendNotification("Dungeon AutoFarm", "Cupid Queen - Waiting for spawn...")
+    
+    local noDamageTime = 0
+    local lastHealth = nil
+    local phase = 1
+    local noQueenTime = 0
+    local lastQueenCheck = tick()
+    
+    -- Сбрасываем таймеры
+    queenStatuePositionTimer = 0
+    lastQueenCheckTime = tick()
+    
+    -- Ждём появления королевы
+    local waitStart = tick()
+    while autoFarmEnabled and tick() - waitStart < 30 do
+        local cupidQueen = getCupidQueen()
+        if cupidQueen then
+            local humanoid = cupidQueen:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                sendNotification("Dungeon AutoFarm", "Cupid Queen spawned! Starting fight...")
+                break
+            end
+        end
+        task.wait(1)
+    end
+    
+    while autoFarmEnabled do
+        local cupidQueen = getCupidQueen()
+        
+        -- Проверяем, не зависла ли королева на позиции статуй
+        if cupidQueen and isQueenReadyForStatuePhase() then
+            sendNotification("Dungeon AutoFarm", "Queen at statue position for 2+ seconds - Checking statues...")
+            
+            if not areAllStatuesDestroyed() then
+                sendNotification("Dungeon AutoFarm", "Statues need to be broken!")
+                breakStatues()
+            else
+                sendNotification("Dungeon AutoFarm", "All statues already destroyed!")
+            end
+            
+            queenStatuePositionTimer = 0
+            task.wait(1)
+            continue
+        end
+        
+        if not cupidQueen then
+            -- Королевы нет на сцене
+            local currentTime = tick()
+            if lastQueenCheck == 0 then
+                lastQueenCheck = currentTime
+            end
+            
+            noQueenTime = currentTime - lastQueenCheck
+            
+            if noQueenTime > 5 then
+                -- Королевы нет больше 5 секунд, проверяем статуи
+                if not areAllStatuesDestroyed() then
+                    sendNotification("Dungeon AutoFarm", "Queen missing for 5s - Breaking statues...")
+                    breakStatues()
+                    lastQueenCheck = tick()
+                    noQueenTime = 0
+                else
+                    -- Статуи уничтожены, но королевы нет - возможно, она переспавнивается
+                    sendNotification("Dungeon AutoFarm", "Waiting for Cupid Queen to respawn...")
+                    task.wait(2)
+                    lastQueenCheck = tick()
+                end
+            else
+                task.wait(0.5)
+            end
+        else
+            -- Королева найдена, сбрасываем таймер отсутствия
+            lastQueenCheck = tick()
+            noQueenTime = 0
+            
+            local humanoid = cupidQueen:FindFirstChild("Humanoid")
+            if not humanoid then
+                task.wait(WAIT_FOR_NPC_INTERVAL)
+                continue
+            end
+            
+            if humanoid.Health <= 0 then
+                sendNotification("Dungeon AutoFarm", "Cupid Queen defeated!")
+                return true
+            end
+            
+            local currentHealth = humanoid.Health
+            
+            -- Проверка застревания (нет урона)
+            if lastHealth and currentHealth >= lastHealth then
+                noDamageTime = noDamageTime + AUTO_FARM_UPDATE_INTERVAL
+                if noDamageTime > 10 then
+                    sendNotification("Dungeon AutoFarm", "No damage for 10s - Checking statues...")
+                    if not areAllStatuesDestroyed() then
+                        breakStatues()
+                    end
+                    noDamageTime = 0
+                end
+            else
+                noDamageTime = 0
+            end
+            lastHealth = currentHealth
+            
+            -- Показываем прогресс
+            if currentHealth < 2000 then
+                if phase ~= 3 then
+                    phase = 3
+                    sendNotification("Dungeon AutoFarm", string.format("Queen HP: %.0f - Almost there!", currentHealth))
+                end
+            elseif currentHealth < 5000 and phase ~= 2 then
+                phase = 2
+                sendNotification("Dungeon AutoFarm", string.format("Queen HP: %.0f - Phase 2", currentHealth))
+            elseif phase == 1 and currentHealth < 8000 then
+                phase = 1
+                sendNotification("Dungeon AutoFarm", string.format("Queen HP: %.0f remaining", currentHealth))
+            end
+            
+            -- Если королева на позиции статуй, не атакуем
+            if isCupidQueenAtStatuePosition() then
+                if not areAllStatuesDestroyed() then
+                    sendNotification("Dungeon AutoFarm", "Queen at statue position - Breaking statues...")
+                    breakStatues()
+                end
+                task.wait(WAIT_FOR_NPC_INTERVAL)
+            else
+                -- Атакуем королеву
+                local character = Players.LocalPlayer.Character
+                if not character then
+                    task.wait(WAIT_FOR_NPC_INTERVAL)
+                    continue
+                end
+                
+                local rootPart = character:FindFirstChild("HumanoidRootPart")
+                local queenRoot = cupidQueen:FindFirstChild("HumanoidRootPart")
+                
+                if not rootPart or not queenRoot then
+                    task.wait(WAIT_FOR_NPC_INTERVAL)
+                    continue
+                end
+                
+                local horizontalDistance = Vector2.new(
+                    rootPart.Position.X - queenRoot.Position.X,
+                    rootPart.Position.Z - queenRoot.Position.Z
+                ).Magnitude
+                
+                if horizontalDistance <= NPC_ARRIVAL_DISTANCE then
+                    lockAboveNPCVelocity(cupidQueen)
+                    attack()
+                else
+                    local targetPos = queenRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
+                    moveToPositionVelocity(targetPos)
+                end
+            end
+        end
+        
+        task.wait(TIME_BETWEEN_ATTACKS)
+    end
+    
+    return false
+end
+
+local function finishCupidQueen()
+    sendNotification("Dungeon AutoFarm", "Finishing Cupid Queen...")
+    
+    local startTime = tick()
+    local lastHealth = nil
+    local stuckTime = 0
+    local lastPosition = nil
+    
+    while autoFarmEnabled and tick() - startTime < 120 do
+        local cupidQueen = getCupidQueen()
+        
+        if not cupidQueen then
+            task.wait(0.5)
+            cupidQueen = getCupidQueen()
+            if not cupidQueen then
+                -- Проверяем статуи перед завершением
+                if not areAllStatuesDestroyed() then
+                    sendNotification("Dungeon AutoFarm", "Queen missing, breaking statues...")
+                    breakStatues()
+                else
+                    sendNotification("Dungeon AutoFarm", "Cupid Queen defeated!")
+                    return true
+                end
+            end
+            continue
+        end
+        
+        local humanoid = cupidQueen:FindFirstChild("Humanoid")
+        if not humanoid then
+            task.wait(WAIT_FOR_NPC_INTERVAL)
+            continue
+        end
+        
+        if humanoid.Health <= 0 then
+            sendNotification("Dungeon AutoFarm", "Cupid Queen defeated!")
+            return true
+        end
+        
+        -- Проверка на застревание (позиция не меняется)
+        local queenRoot = cupidQueen:FindFirstChild("HumanoidRootPart")
+        if queenRoot then
+            local currentPos = queenRoot.Position
+            if lastPosition and (currentPos - lastPosition).Magnitude < 1 then
+                stuckTime = stuckTime + AUTO_FARM_UPDATE_INTERVAL
+                if stuckTime > 15 then
+                    sendNotification("Dungeon AutoFarm", "Queen stuck! Checking statues...")
+                    if not areAllStatuesDestroyed() then
+                        breakStatues()
+                    end
+                    stuckTime = 0
+                end
+            else
+                stuckTime = 0
+            end
+            lastPosition = currentPos
+        end
+        
+        if lastHealth ~= humanoid.Health and math.floor(tick() - startTime) % 10 < 1 then
+            sendNotification("Dungeon AutoFarm", string.format("Cupid Queen: %.0f HP left", humanoid.Health))
+            lastHealth = humanoid.Health
+        end
+        
+        -- Если королева на позиции статуй
+        if isCupidQueenAtStatuePosition() then
+            if not areAllStatuesDestroyed() then
+                sendNotification("Dungeon AutoFarm", "Queen at statue position - Breaking statues...")
+                breakStatues()
+            else
+                sendNotification("Dungeon AutoFarm", "Queen at statue position, waiting for return...")
+                task.wait(2)
+            end
+            continue
+        end
+        
+        local character = Players.LocalPlayer.Character
+        if not character then
+            task.wait(WAIT_FOR_NPC_INTERVAL)
+            continue
+        end
+        
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart or not queenRoot then
+            task.wait(WAIT_FOR_NPC_INTERVAL)
+            continue
+        end
+        
+        local horizontalDistance = Vector2.new(
+            rootPart.Position.X - queenRoot.Position.X,
+            rootPart.Position.Z - queenRoot.Position.Z
+        ).Magnitude
+        
+        if horizontalDistance <= NPC_ARRIVAL_DISTANCE then
+            lockAboveNPCVelocity(cupidQueen)
+            attack()
+        else
+            local targetPos = queenRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
+            moveToPositionVelocity(targetPos)
+        end
+        
+        task.wait(TIME_BETWEEN_ATTACKS)
+    end
+    
+    if isCupidQueenAlive() then
+        sendNotification("Dungeon AutoFarm", "Cupid Queen still alive, continuing...")
+        return fightCupidQueenWithPhases()
+    end
+    
+    return true
+end
+
+-- ==================== ОСТАЛЬНЫЕ ФУНКЦИИ АВТОФАРМА ====================
 local function sendNotification(title, content)
     pcall(function()
         Rayfield:Notify({
@@ -211,12 +1170,6 @@ local function sendNotification(title, content)
     end)
 end
 
-local AutoFarmTab = Window:CreateTab("Dungeon AutoFarm", 0)
-local InfoTab = Window:CreateTab("Info", 0)
-
-local startDungeonFarm
-
--- ==================== ПОДГОТОВКА ПЕРСОНАЖА ====================
 local function prepareCharacterForFlight()
     local character = Players.LocalPlayer.Character
     if not character then return end
@@ -224,7 +1177,11 @@ local function prepareCharacterForFlight()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
     
-    rootPart.CanCollide = false
+    if not noclipEnabled then
+        pcall(function()
+            PhysicsService:SetPartCollisionGroup(rootPart, NOCLIP_GROUP)
+        end)
+    end
     
     local humanoid = character:FindFirstChild("Humanoid")
     if humanoid then
@@ -239,9 +1196,13 @@ local function restoreCharacterPhysics()
     
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if rootPart then
-        rootPart.CanCollide = true
         rootPart.AssemblyLinearVelocity = Vector3.zero
         rootPart.AssemblyAngularVelocity = Vector3.zero
+        if not noclipEnabled then
+            pcall(function()
+                PhysicsService:SetPartCollisionGroup(rootPart, "Default")
+            end)
+        end
     end
     
     local humanoid = character:FindFirstChild("Humanoid")
@@ -251,54 +1212,6 @@ local function restoreCharacterPhysics()
     end
 end
 
--- ==================== ЧИСТЫЙ CFrame ПОЛЁТ ====================
-local function moveToPosition(targetPosition)
-    local character = Players.LocalPlayer.Character
-    if not character then return false end
-    
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return false end
-    
-    local currentPosition = rootPart.Position
-    local distance = (currentPosition - targetPosition).Magnitude
-    
-    if distance <= WAYPOINT_ARRIVAL_DISTANCE then
-        rootPart.CFrame = CFrame.new(targetPosition)
-        return true
-    end
-    
-    local step = math.min(MOVE_SPEED * AUTO_FARM_UPDATE_INTERVAL, distance)
-    local direction = (targetPosition - currentPosition).Unit
-    local newPosition = currentPosition + direction * step
-    
-    rootPart.CFrame = CFrame.new(newPosition, targetPosition)
-    rootPart.AssemblyLinearVelocity = Vector3.zero
-    rootPart.AssemblyAngularVelocity = Vector3.zero
-    
-    return false
-end
-
--- ХАРД-ЛОК НАД NPC
-local function lockAboveNPC(npc)
-    local character = Players.LocalPlayer.Character
-    if not character then return false end
-    
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return false end
-    
-    local npcRoot = npc:FindFirstChild("HumanoidRootPart")
-    if not npcRoot then return false end
-    
-    local targetPosition = npcRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
-    
-    rootPart.CFrame = CFrame.new(targetPosition, npcRoot.Position)
-    rootPart.AssemblyLinearVelocity = Vector3.zero
-    rootPart.AssemblyAngularVelocity = Vector3.zero
-    
-    return true
-end
-
--- ==================== NPC ПОИСК ====================
 local function getAllNPCsByName(npcName)
     local result = {}
     local npcsFolder = Workspace:FindFirstChild("NPCs")
@@ -337,7 +1250,28 @@ local function getAllAliveNPCs()
     return result
 end
 
--- ==================== ОЖИДАНИЕ СПАВНА NPC ====================
+local function hasAliveNPCsInRadius(centerPosition, radius)
+    local npcsFolder = Workspace:FindFirstChild("NPCs")
+    if not npcsFolder then
+        return false
+    end
+    
+    for _, child in ipairs(npcsFolder:GetChildren()) do
+        local humanoid = child:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            local npcRoot = child:FindFirstChild("HumanoidRootPart")
+            if npcRoot then
+                local distance = (centerPosition - npcRoot.Position).Magnitude
+                if distance <= radius then
+                    return true
+                end
+            end
+        end
+    end
+    
+    return false
+end
+
 local function waitForNPCSpawn(npcNamesList, timeout)
     local startTime = tick()
     
@@ -355,7 +1289,6 @@ local function waitForNPCSpawn(npcNamesList, timeout)
     return false
 end
 
--- ==================== АТАКА ====================
 local function attack()
     local currentTime = tick()
     if currentTime - lastAttackTime >= TIME_BETWEEN_ATTACKS then
@@ -369,33 +1302,64 @@ local function attack()
     return false
 end
 
--- ==================== ОЧИСТКА ЗОНЫ ====================
-local function clearNPCs(npcNamesList)
-    sendNotification("Dungeon AutoFarm", "Waiting for NPCs to spawn...")
+local function clearNPCs(npcNamesList, waypointPosition)
+    local shouldClearAnyNPCs = false
     
-    if not waitForNPCSpawn(npcNamesList, SPAWN_WAIT_TIMEOUT) then
-        sendNotification("Dungeon AutoFarm", "No NPCs spawned, skipping...")
-        return true
+    if #npcNamesList == 0 then
+        if waypointPosition and hasAliveNPCsInRadius(waypointPosition, 50) then
+            sendNotification("Dungeon AutoFarm", "Found enemies nearby! Clearing all...")
+            shouldClearAnyNPCs = true
+        else
+            return true
+        end
+    else
+        if not waitForNPCSpawn(npcNamesList, SPAWN_WAIT_TIMEOUT) then
+            if hasAliveNPCsInRadius(waypointPosition or Vector3.zero, 50) then
+                sendNotification("Dungeon AutoFarm", "Target NPCs not found, clearing all nearby enemies...")
+                shouldClearAnyNPCs = true
+            else
+                sendNotification("Dungeon AutoFarm", "No NPCs spawned, skipping...")
+                return true
+            end
+        end
     end
     
-    sendNotification("Dungeon AutoFarm", "NPCs spawned, clearing...")
+    sendNotification("Dungeon AutoFarm", "Clearing zone...")
     
     local startTime = tick()
     
     while autoFarmEnabled and tick() - startTime < TIMEOUT_DURATION do
         local aliveNPCs = {}
-        for _, npcName in ipairs(npcNamesList) do
-            local npcs = getAllNPCsByName(npcName)
-            for _, npc in ipairs(npcs) do
-                table.insert(aliveNPCs, npc)
+        
+        if shouldClearAnyNPCs or #npcNamesList == 0 then
+            local npcsFolder = Workspace:FindFirstChild("NPCs")
+            if npcsFolder then
+                for _, child in ipairs(npcsFolder:GetChildren()) do
+                    local humanoid = child:FindFirstChild("Humanoid")
+                    if humanoid and humanoid.Health > 0 then
+                        local npcRoot = child:FindFirstChild("HumanoidRootPart")
+                        if npcRoot and waypointPosition then
+                            local distance = (waypointPosition - npcRoot.Position).Magnitude
+                            if distance <= 60 then
+                                table.insert(aliveNPCs, child)
+                            end
+                        elseif npcRoot then
+                            table.insert(aliveNPCs, child)
+                        end
+                    end
+                end
+            end
+        else
+            for _, npcName in ipairs(npcNamesList) do
+                local npcs = getAllNPCsByName(npcName)
+                for _, npc in ipairs(npcs) do
+                    table.insert(aliveNPCs, npc)
+                end
             end
         end
         
         if #aliveNPCs == 0 then
-            aliveNPCs = getAllAliveNPCs()
-        end
-        
-        if #aliveNPCs == 0 then
+            sendNotification("Dungeon AutoFarm", "Zone cleared!")
             return true
         end
         
@@ -430,11 +1394,11 @@ local function clearNPCs(npcNamesList)
                         ).Magnitude
                         
                         if horizontalDistance <= NPC_ARRIVAL_DISTANCE then
-                            lockAboveNPC(nearestNPC)
+                            lockAboveNPCVelocity(nearestNPC)
                             attack()
                         else
                             local targetPos = npcRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
-                            moveToPosition(targetPos)
+                            moveToPositionVelocity(targetPos)
                         end
                     end
                 end
@@ -444,10 +1408,10 @@ local function clearNPCs(npcNamesList)
         task.wait(AUTO_FARM_UPDATE_INTERVAL)
     end
     
+    sendNotification("Dungeon AutoFarm", "Zone clear timeout, moving on...")
     return false
 end
 
--- ==================== БОСС ДО СМЕРТИ ====================
 local function killBossUntilDead(bossName)
     sendNotification("Dungeon AutoFarm", "Fighting " .. bossName .. " until death...")
     
@@ -481,11 +1445,11 @@ local function killBossUntilDead(bossName)
                 ).Magnitude
                 
                 if horizontalDistance <= NPC_ARRIVAL_DISTANCE then
-                    lockAboveNPC(boss)
+                    lockAboveNPCVelocity(boss)
                     attack()
                 else
                     local targetPos = bossRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
-                    moveToPosition(targetPos)
+                    moveToPositionVelocity(targetPos)
                 end
             end
         end
@@ -496,150 +1460,26 @@ local function killBossUntilDead(bossName)
     return false
 end
 
--- ==================== СТАТУИ ====================
-local function breakStatues()
-    local statuesFolder = Workspace:FindFirstChild("Env")
-    if not statuesFolder then
-        return false
+local function equipWeaponForFarm()
+    if equipBackWeapon() then
+        sendNotification("Dungeon AutoFarm", "Weapon equipped successfully!")
+        return true
     end
     
-    local statues = statuesFolder:FindFirstChild("Statues")
-    if not statues then
-        statues = statuesFolder
-    end
-    
-    local statuesToBreak = {}
-    
-    local statueByName = statues:FindFirstChild("Statue3")
-    if statueByName then table.insert(statuesToBreak, statueByName) end
-    
-    local statueMain = statues:FindFirstChild("Statue")
-    if statueMain then table.insert(statuesToBreak, statueMain) end
-    
-    local statue2 = statues:FindFirstChild("Statue2")
-    if statue2 then table.insert(statuesToBreak, statue2) end
-    
-    if #statuesToBreak == 0 then
-        local children = statues:GetChildren()
-        if children[3] then table.insert(statuesToBreak, children[3]) end
-        if children[2] then table.insert(statuesToBreak, children[2]) end
-    end
-    
-    for statueIndex, statue in ipairs(statuesToBreak) do
-        if not autoFarmEnabled then return false end
-        
-        local statuePos = statue:GetPivot().Position
-        local targetPos = statuePos + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
-        
-        local moveResult = false
-        repeat
-            if not autoFarmEnabled then break end
-            moveResult = moveToPosition(targetPos)
-            task.wait(AUTO_FARM_UPDATE_INTERVAL)
-        until moveResult == true
-        
-        if not autoFarmEnabled then return false end
-        
-        local damageNeeded = 1000 - (damageDealtToStatues[statueIndex] or 0)
-        local attacksNeeded = math.ceil(damageNeeded / DAMAGE_PER_ATTACK)
-        
-        for i = 1, attacksNeeded do
-            if not autoFarmEnabled then return false end
-            
-            local character = Players.LocalPlayer.Character
-            if character then
-                local rootPart = character:FindFirstChild("HumanoidRootPart")
-                if rootPart then
-                    rootPart.CFrame = CFrame.new(targetPos, statuePos)
-                end
-            end
-            
-            attack()
-            damageDealtToStatues[statueIndex] = (damageDealtToStatues[statueIndex] or 0) + DAMAGE_PER_ATTACK
-            task.wait(TIME_BETWEEN_ATTACKS)
-        end
-    end
-    
-    return true
-end
-
--- ==================== CUPID QUEEN ====================
-local function getCupidQueen()
-    local npcsFolder = Workspace:FindFirstChild("NPCs")
-    if not npcsFolder then
-        return nil
-    end
-    return npcsFolder:FindFirstChild("Cupid Queen")
-end
-
-local function fightCupidQueen(requiredDamage)
-    local startTime = tick()
-    local damageDealt = 0
-    
-    while autoFarmEnabled and tick() - startTime < TIMEOUT_DURATION and damageDealt < requiredDamage do
-        local cupidQueen = getCupidQueen()
-        if not cupidQueen then 
-            task.wait(WAIT_FOR_NPC_INTERVAL)
-        else
-            local humanoid = cupidQueen:FindFirstChild("Humanoid")
-            if not humanoid then return true end
-            
-            local character = Players.LocalPlayer.Character
-            if not character then
-                task.wait(WAIT_FOR_NPC_INTERVAL)
-            else
-                local rootPart = character:FindFirstChild("HumanoidRootPart")
-                if not rootPart then
-                    task.wait(WAIT_FOR_NPC_INTERVAL)
-                else
-                    local queenRoot = cupidQueen:FindFirstChild("HumanoidRootPart")
-                    if queenRoot then
-                        local horizontalDistance = Vector2.new(
-                            rootPart.Position.X - queenRoot.Position.X,
-                            rootPart.Position.Z - queenRoot.Position.Z
-                        ).Magnitude
-                        
-                        if horizontalDistance <= NPC_ARRIVAL_DISTANCE then
-                            lockAboveNPC(cupidQueen)
-                            attack()
-                            damageDealt = damageDealt + DAMAGE_PER_ATTACK
-                        else
-                            local targetPos = queenRoot.Position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0)
-                            moveToPosition(targetPos)
-                        end
-                    end
-                end
-            end
-        end
-        
-        task.wait(TIME_BETWEEN_ATTACKS)
-    end
-    
-    return damageDealt >= requiredDamage
-end
-
--- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
-local function equipIcebornBlade()
     local localPlayer = Players.LocalPlayer
     local backpack = localPlayer:FindFirstChild("Backpack")
     
     if backpack then
-        local icebornBlade = backpack:FindFirstChild("Iceborn Blade")
-        if icebornBlade and icebornBlade:IsA("Tool") then
-            icebornBlade.Parent = localPlayer.Character
-            task.wait(0.5)
-            return true
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                tool.Parent = localPlayer.Character
+                sendNotification("Dungeon AutoFarm", "Equipped: " .. tool.Name)
+                return true
+            end
         end
     end
     
-    local character = localPlayer.Character
-    if character then
-        local heldBlade = character:FindFirstChild("Iceborn Blade")
-        if heldBlade then
-            return true
-        end
-    end
-    
+    sendNotification("Dungeon AutoFarm", "No weapon found in backpack!")
     return false
 end
 
@@ -649,7 +1489,6 @@ local function activateBusoHaki()
     end)
 end
 
--- ==================== ОЖИДАНИЕ СТАРТОВОЙ ТОЧКИ ====================
 local function waitUntilAtStart()
     local startPos = waypoints[1].position
     
@@ -677,8 +1516,7 @@ local function waitUntilAtStart()
     return false
 end
 
--- ==================== ОСНОВНАЯ ФУНКЦИЯ АВТОФАРМА ====================
-startDungeonFarm = function()
+local function startDungeonFarm()
     if isFarming then return end
     isFarming = true
     
@@ -693,13 +1531,13 @@ startDungeonFarm = function()
     
     prepareCharacterForFlight()
     
-    sendNotification("Dungeon AutoFarm", "Starting (Pure CFrame Flight)...")
+    sendNotification("Dungeon AutoFarm", "Starting (HYBRID Velocity + CFrame)...")
     
     local startWaypoint = waypoints[1]
     local moveResult = false
     repeat
         if not autoFarmEnabled then break end
-        moveResult = moveToPosition(startWaypoint.position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0))
+        moveResult = moveToPositionVelocity(startWaypoint.position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0))
         task.wait(AUTO_FARM_UPDATE_INTERVAL)
     until moveResult == true
     
@@ -709,8 +1547,8 @@ startDungeonFarm = function()
         return
     end
     
-    sendNotification("Dungeon AutoFarm", "Equipping Iceborn Blade...")
-    equipIcebornBlade()
+    sendNotification("Dungeon AutoFarm", "Equipping weapon...")
+    equipWeaponForFarm()
     task.wait(0.5)
     
     sendNotification("Dungeon AutoFarm", "Activating Buso Haki...")
@@ -723,33 +1561,35 @@ startDungeonFarm = function()
         local waypoint = waypoints[stageIndex]
         currentStage = waypoint.index
         
-        sendNotification("Dungeon AutoFarm", "Stage " .. (stageIndex - 1) .. ": Moving...")
+        sendNotification("Dungeon AutoFarm", "Stage " .. (stageIndex - 1) .. ": Moving to waypoint...")
         
         repeat
             if not autoFarmEnabled then break end
-            moveResult = moveToPosition(waypoint.position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0))
+            moveResult = moveToPositionVelocity(waypoint.position + Vector3.new(0, FLY_HEIGHT_OFFSET, 0))
             task.wait(AUTO_FARM_UPDATE_INTERVAL)
         until moveResult == true
         
         if not autoFarmEnabled then break end
         
         if waypoint.action == "fight" then
-            sendNotification("Dungeon AutoFarm", "Stage " .. (stageIndex - 1) .. ": Clearing...")
-            clearNPCs(waypoint.npcsToKill)
+            sendNotification("Dungeon AutoFarm", "Stage " .. (stageIndex - 1) .. ": Clearing zone...")
+            clearNPCs(waypoint.npcsToKill, waypoint.position)
             
         elseif waypoint.action == "boss" then
             sendNotification("Dungeon AutoFarm", "Stage " .. (stageIndex - 1) .. ": Fighting boss...")
             killBossUntilDead(waypoint.npcsToKill[1])
             
         elseif waypoint.action == "cupid_queen" then
-            sendNotification("Dungeon AutoFarm", "Breaking statues...")
-            breakStatues()
+            sendNotification("Dungeon AutoFarm", "Starting Cupid Queen fight...")
             
-            sendNotification("Dungeon AutoFarm", "Fighting Cupid Queen (first phase)...")
-            fightCupidQueen(2500)
+            local queenDefeated = fightCupidQueenWithPhases()
             
-            sendNotification("Dungeon AutoFarm", "Finishing Cupid Queen...")
-            fightCupidQueen(999999)
+            if queenDefeated then
+                sendNotification("Dungeon AutoFarm", "Cupid Queen has been defeated!")
+            else
+                sendNotification("Dungeon AutoFarm", "Finishing Cupid Queen...")
+                finishCupidQueen()
+            end
         end
     end
     
@@ -759,16 +1599,15 @@ startDungeonFarm = function()
     isFarming = false
 end
 
--- ==================== UI ЭЛЕМЕНТЫ ====================
+-- ==================== UI ЭЛЕМЕНТЫ AUTOFARM TAB ====================
 local AutoFarmToggle = AutoFarmTab:CreateToggle({
-    Name = "Enable Dungeon AutoFarm | " .. gameName,
+    Name = "Enable Dungeon AutoFarm | HYBRID Movement",
     CurrentValue = autoFarmEnabled,
     Flag = "DungeonAutoFarm",
     Callback = function(Value)
         autoFarmEnabled = Value
         if Value then
             currentStage = 1
-            damageDealtToStatues = {0, 0, 0}
             isFarming = false
             if farmCoroutine then
                 pcall(function()
@@ -779,11 +1618,8 @@ local AutoFarmToggle = AutoFarmTab:CreateToggle({
                 farmCoroutine = nil
             end
             farmCoroutine = task.spawn(function()
-                if startDungeonFarm then
-                    startDungeonFarm()
-                end
+                startDungeonFarm()
             end)
-            -- Запускаем Sky Walk
             startSkyWalkLoop()
         else
             restoreCharacterPhysics()
@@ -795,7 +1631,6 @@ local AutoFarmToggle = AutoFarmTab:CreateToggle({
                 end)
                 farmCoroutine = nil
             end
-            -- Останавливаем Sky Walk
             stopSkyWalkLoop()
         end
     end
@@ -825,6 +1660,18 @@ local FlyHeightSlider = AutoFarmTab:CreateSlider({
     end
 })
 
+local GravityCompSlider = AutoFarmTab:CreateSlider({
+    Name = "Gravity Compensation (Upward Force)", 
+    Range = {20, 60}, 
+    Increment = 5, 
+    Suffix = "studs/s",
+    CurrentValue = UPWARD_DRIFT_COMPENSATION, 
+    Flag = "GravityComp",
+    Callback = function(Value) 
+        UPWARD_DRIFT_COMPENSATION = Value 
+    end
+})
+
 local SpawnTimeoutSlider = AutoFarmTab:CreateSlider({
     Name = "Spawn Wait Timeout", 
     Range = {3, 15}, 
@@ -838,43 +1685,44 @@ local SpawnTimeoutSlider = AutoFarmTab:CreateSlider({
 })
 
 AutoFarmTab:CreateParagraph({
-    Title = "Dungeon AutoFarm Info - " .. gameName,
-    Content = "✓ PURE CFrame FLIGHT (no physics)\n" ..
-              "✓ HARD LOCK above NPCs (no circling)\n" ..
-              "✓ Waits for NPC spawn\n" ..
-              "✓ No BodyVelocity, no PlatformStand\n" ..
-              "✓ 60 FPS movement\n" ..
-              "✓ Auto-equip Iceborn Blade\n" ..
-              "✓ Auto-activate Buso Haki\n" ..
-              "✓ Auto Sky Walk every 2 seconds\n" ..
-              "✓ Full dungeon clear\n\n" ..
-              "Stages: 1→2→3→4→5→6→7→8(Leo)→9→10(Cupid Queen)\n\n" ..
-              "⚠️ Keep speed at 45-60 for best results!\n" ..
-              "⚠️ Have Iceborn Blade in backpack!"
+    Title = "Dungeon AutoFarm Info - FIXED CUPID QUEEN",
+    Content = "✓ HYBRID Movement (umm)\n" ..
+
 })
 
+-- ==================== INFO TAB ====================
 InfoTab:CreateSection("About")
 InfoTab:CreateParagraph({
-    Title = "Simforea Hub | Dungeon AutoFarm",
+    Title = "Simforea Hub | HYBRID Movement + Dungeon AutoFarm",
     Content = "Made for GPO\n\n" ..
-              "Supported Place IDs:\n" ..
-              "• 3978370137 - Grand Piece Online 1 Sea\n" ..
-              "• 11424731604 - Grand Piece Online (New)\n\n" ..
-              "Stages:\n" ..
-              "1: Start (WAIT FOR PLAYER)\n" ..
-              "2: First mobs\n" ..
-              "3: Second mobs\n" ..
-              "4: Third mobs\n" ..
-              "5: Fourth mobs\n" ..
-              "6: Fifth mobs (NEW!)\n" ..
-              "7: Sixth mobs\n" ..
-              "8: Leo (Boss - NO TIMEOUT)\n" ..
-              "9: Move to Cupid Queen\n" ..
-              "10: Cupid Queen + Statues\n\n" ..
-              "Architecture: Pure CFrame | Hard Lock | No Physics\n" ..
-              "✓ Leo теперь убивается до конца (без таймаута)\n" ..
-              "✓ Автофарм ждёт у входа\n" ..
-              "✓ Автоматический Sky Walk каждые 2 секунды"
 })
 
-sendNotification("Simforea Hub", "Dungeon AutoFarm loaded!\nPlace ID: " .. currentPlaceId .. " | " .. gameName)
+-- ==================== ГОРЯЧИЕ КЛАВИШИ ====================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.Insert then
+        SpeedhackToggle:Set(not speedhackEnabled)
+    elseif input.KeyCode == Enum.KeyCode.Home then
+        if not autoFarmEnabled then
+            FlyhackToggle:Set(not flyhackEnabled)
+        end
+    elseif input.KeyCode == Enum.KeyCode.PageUp then
+        InfiniteJumpToggle:Set(not infiniteJumpEnabled)
+    elseif input.KeyCode == Enum.KeyCode.End then
+        NoclipToggle:Set(not noclipEnabled)
+    end
+end)
+
+-- ==================== ЗАПУСК ====================
+RunService.Heartbeat:Connect(function()
+    if autoFarmEnabled then
+        pcall(stabilizeCharacter)
+    end
+    
+    pcall(updateSpeedhack)
+    pcall(updateFlyhack)
+    pcall(updateInfiniteJump)
+end)
+
+sendNotification("Simforea Hub", "Loaded in: " .. gameName .. "!\n" ..)
