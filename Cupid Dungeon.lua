@@ -1,3 +1,6 @@
+-- Dungeon AutoFarm + Movement (Speedhack/Fly/Infinite Jump/Advanced Noclip) with Rayfield UI
+-- Добавлена проверка здоровья статуй через barrelHP Value
+-- Исправлена проблема зависания на Cupid Queen
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -422,7 +425,7 @@ local Window = Rayfield:CreateWindow({
     Name = "Simforea Hub | " .. gameName,
     Icon = 0,
     LoadingTitle = "Simforea Hub",
-    LoadingSubtitle = "HYBRID Movement + Dungeon AutoFarm | " .. gameName,
+    LoadingSubtitle = "PLS FIX  | " .. gameName,
     Theme = "Default",
     ConfigurationSaving = {
         Enabled = true,
@@ -501,19 +504,6 @@ local NoclipToggle = MovementTab:CreateToggle({
 MovementTab:CreateParagraph({
     Title = "⚠️ Movement & Anti-Cheat Info",
     Content = "Movement System:\n" ..
-              "✓ Speedhack - Velocity based\n" ..
-              "✓ Flyhack - WASD + Space/Ctrl\n" ..
-              "✓ Infinite Jump - Boost based\n" ..
-              "✓ Advanced Noclip - CollisionGroup\n\n" ..
-              "AutoFarm Movement (HYBRID):\n" ..
-              "✓ Long distance: AssemblyLinearVelocity\n" ..
-              "✓ Close to NPC: Velocity + CFrame lock\n" ..
-              "✓ Gravity compensation (+35 Y velocity)\n" ..
-              "✓ Angular velocity always zero\n" ..
-              "✓ Much harder to detect than pure CFrame!\n\n" ..
-              "Hotkeys:\n" ..
-              "Insert - Speedhack | Home - Flyhack\n" ..
-              "PageUp - Infinite Jump | End - Noclip"
 })
 
 -- ==================== ФУНКЦИИ SPEEDHACK, FLYHACK И INFINITE JUMP ====================
@@ -1685,9 +1675,8 @@ local SpawnTimeoutSlider = AutoFarmTab:CreateSlider({
 })
 
 AutoFarmTab:CreateParagraph({
-    Title = "Dungeon AutoFarm Info - FIXED CUPID QUEEN",
-    Content = "✓ HYBRID Movement (umm)\n" ..
-
+    Title = "Dungeon AutoFarm Info - fix plss",
+    Content = "lol"
 })
 
 -- ==================== INFO TAB ====================
@@ -1725,4 +1714,4 @@ RunService.Heartbeat:Connect(function()
     pcall(updateInfiniteJump)
 end)
 
-sendNotification("Simforea Hub", "Loaded in: " .. gameName .. "!\n" ..)
+sendNotification("Simforea Hub", "Loaded in: " .. gameName .. "!\n" ..")
