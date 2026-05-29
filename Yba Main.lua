@@ -1,11 +1,10 @@
--- Simforea Hub - Universal Movement Hack + ESP + NoClip (SMOOTH ESP FIX)
+-- Simforea Hub - Rayfield UI + AutoFarm + Item ESP (Fixed)
 -- Designed for Place ID: 2809202155
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
-local HttpService = game:GetService("HttpService")
 
 -- Дожидаемся камеры
 local Camera = workspace.CurrentCamera or workspace:WaitForChild("CurrentCamera")
@@ -16,64 +15,30 @@ if not hasDrawing then
     warn("Drawing API not supported – ESP disabled")
 end
 
--- ==================== ITEM CACHE (БЕЗ ЛАГОВ) ====================
+print("========================================")
+print("[Simforea] Loading...")
+print("========================================")
 
-local CachedPrompts = {}
+-- ==================== ИСПРАВЛЕННЫЕ БАЙПАСЫ ====================
 
-local function isValidPrompt(v)
-    return v:IsA("ProximityPrompt")
-        and v.ObjectText
-        and v.ObjectText ~= ""
-end
-
-local function addPrompt(v)
-    if isValidPrompt(v) then
-        CachedPrompts[v] = true
+-- 1. Anti-Kick - через pcall (без ошибки)
+local player = Players.LocalPlayer
+pcall(function()
+    local originalKick = player.Kick
+    if originalKick then
+        player.Kick = function(self, message)
+            warn("[Simforea] Blocked kick: " .. tostring(message))
+            return nil
+        end
     end
-end
+end)
 
-local function removePrompt(v)
-    CachedPrompts[v] = nil
-    
-    if itemEspObjects and itemEspObjects[v] then
-        removeItemESP(v)
-    end
-end
-
--- Первичная загрузка (один раз)
-for _, v in ipairs(workspace:GetDescendants()) do
-    addPrompt(v)
-end
-
--- Слушаем изменения
-workspace.DescendantAdded:Connect(addPrompt)
-workspace.DescendantRemoving:Connect(removePrompt)
-
-local function getAllItemPrompts()
-    return CachedPrompts
-end
-
--- ==================== АНТИ-ЧИТ БАЙПАСЫ ====================
-
--- 1. Teleport Bypass
-local OldNamecallTP;
-OldNamecallTP = hookmetamethod(game, '__namecall', newcclosure(function(self, ...)
-    local Arguments = {...}
-    local Method = getnamecallmethod()
- 
-    if Method == "InvokeServer" and Arguments[1] == "idklolbrah2de" then
-        return "  ___XP DE KEY"
-    end
- 
-    return OldNamecallTP(self, ...)
-end))
-
--- 2. Item Magnitude Bypass
+-- 2. Magnitude Bypass
 local function setupMagnitudeBypass()
-    local player = Players.LocalPlayer
-    if not player or not player.Character then return end
+    local char = player.Character
+    if not char then return end
     
-    local primaryPart = player.Character:FindFirstChild("HumanoidRootPart")
+    local primaryPart = char:FindFirstChild("HumanoidRootPart")
     if not primaryPart then return end
     
     local OldIndexItem;
@@ -81,218 +46,56 @@ local function setupMagnitudeBypass()
         if not checkcaller() and Key:lower() == 'magnitude' and getcallingscript() and getcallingscript().Name == "ItemSpawn" then
             return 0;
         end
-                                                       
         return OldIndexItem(self, Key)
     end))
 end
 
--- 3. Ghost Item Bypass
-local function safePickupItem(prompt)
-    if prompt and prompt.MaxActivationDistance ~= 0 then
-        pcall(function()
-            fireproximityprompt(prompt)
-        end)
-        return true
+-- 3. Teleport Bypass
+local OldNamecall;
+OldNamecall = hookmetamethod(game, '__namecall', newcclosure(function(self, ...)
+    local Method = getnamecallmethod()
+    local Args = {...}
+    
+    if Method == "InvokeServer" and Args[1] == "idklolbrah2de" then
+        return "  ___XP DE KEY"
     end
-    return false
+    
+    return OldNamecall(self, ...)
+end))
+
+-- Запускаем байпасы
+player.CharacterAdded:Connect(function()
+    task.wait(1)
+    setupMagnitudeBypass()
+end)
+
+if player.Character then
+    task.spawn(function()
+        task.wait(1)
+        setupMagnitudeBypass()
+    end)
 end
 
--- 4. Control Stand
-local standControlActive = false
-local function controlStand(toggle)
-    local player = Players.LocalPlayer
-    if not player then return end
-    
-    local character = player.Character or player.CharacterAdded:Wait()
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChild("Humanoid")
-    
-    if not hrp or not humanoid then return end
-    
-    local function summonStand()
-        if not character:FindFirstChild("SummonedStand") or not character.SummonedStand.Value then
-            repeat
-                task.wait()
-                local remoteFunction = character:FindFirstChild("RemoteFunction")
-                if remoteFunction then
-                    pcall(function()
-                        remoteFunction:InvokeServer("ToggleStand", "Toggle")
-                    end)
-                end
-            until character:FindFirstChild("SummonedStand") and character.SummonedStand.Value
-        end
-    end
-    
-    local function getStand()
-        summonStand()
-        return character:FindFirstChild("StandMorph")
-    end
-    
-    if toggle then
-        if standControlActive then return end
-        standControlActive = true
-        
-        local stand = getStand()
-        if not stand then return end
-        
-        local animController = stand:FindFirstChild("AnimationController")
-        
-        if character:FindFirstChild("FocusCam") == nil then
-            local cameraValue = Instance.new("ObjectValue", character)
-            cameraValue.Name = "FocusCam"
-            cameraValue.Value = animController
-        end
-        
-        local standAttach = stand.PrimaryPart and stand.PrimaryPart:FindFirstChild("StandAttach")
-        if standAttach then
-            local alignPos = standAttach:FindFirstChild("AlignPosition")
-            if alignPos then alignPos.Enabled = false end
-        end
-        
-        task.spawn(function()
-            for _, part in ipairs(stand:GetDescendants()) do
-                if part:IsA("BasePart") or part:IsA("UnionOperation") or part:IsA("MeshPart") then
-                    pcall(function()
-                        part.CollisionGroupId = 1
-                    end)
-                end
-            end
-        end)
-        
-        task.spawn(function()
-            for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("BasePart") or part:IsA("UnionOperation") then
-                    pcall(function()
-                        part.CollisionGroupId = 2
-                    end)
-                end
-            end
-        end)
-        
-        task.spawn(function()
-            while standControlActive and toggle do
-                local currentStand = getStand()
-                local currentAnimController = currentStand and currentStand:FindFirstChild("AnimationController")
-                
-                if currentAnimController and humanoid then
-                    task.spawn(function()
-                        if humanoid.Jump then
-                            currentAnimController.Jump = true
-                        end
-                    end)
-                    
-                    task.spawn(function()
-                        local moveDir = humanoid.MoveDirection
-                        if Camera and Camera.CFrame then
-                            currentAnimController:Move(
-                                Camera.CFrame:VectorToObjectSpace(moveDir),
-                                true
-                            )
-                        end
-                    end)
-                end
-                
-                if hrp and currentStand and currentStand.PrimaryPart then
-                    hrp.CFrame = currentStand.PrimaryPart.CFrame + Vector3.new(0, -30, 0)
-                end
-                
-                task.spawn(function()
-                    if hrp then
-                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                    end
-                end)
-                
-                task.wait()
-            end
-        end)
-        
-    else
-        standControlActive = false
-        
-        local stand = getStand()
-        if stand then
-            local standAttach = stand.PrimaryPart and stand.PrimaryPart:FindFirstChild("StandAttach")
-            if standAttach then
-                local alignPos = standAttach:FindFirstChild("AlignPosition")
-                if alignPos then alignPos.Enabled = true end
-            end
-            
-            for _, part in ipairs(stand:GetDescendants()) do
-                if part:IsA("BasePart") or part:IsA("UnionOperation") or part:IsA("MeshPart") then
-                    pcall(function()
-                        part.CollisionGroupId = 2
-                    end)
-                end
-            end
-        end
-        
-        if character:FindFirstChild("FocusCam") then
-            character.FocusCam:Destroy()
-        end
-        
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") or part:IsA("UnionOperation") then
-                pcall(function()
-                    part.CollisionGroupId = 10
-                end)
-            end
-        end
-        
-        if hrp and stand and stand.PrimaryPart then
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = stand.PrimaryPart.CFrame
-        end
-    end
-end
+print("[Simforea] Bypasses activated")
 
 -- ==================== ПРОВЕРКА ПЛЕЙСА ====================
-local ALLOWED_PLACE_IDS = {
-    [2809202155] = "YBA",
-}
-
 local currentPlaceId = game.PlaceId
-local gameName = ALLOWED_PLACE_IDS[currentPlaceId] or "Unknown Game"
+local gameName = "YBA"
 
-if not ALLOWED_PLACE_IDS[currentPlaceId] then
-    print("=" .. string.rep("=", 60))
-    print("⚠️ SIMFOREA HUB - PLACE ID ERROR ⚠️")
-    print("=" .. string.rep("=", 60))
-    print("Current Place ID: " .. currentPlaceId)
-    print("Game Name: " .. gameName)
-    print("Script stopped.")
-    print("=" .. string.rep("=", 60))
-    return
-end
-
-print("[Simforea Hub] Loaded in: " .. gameName)
-print("[Simforea Hub] Anti-Cheat bypasses active!")
-print("[Simforea Hub] Using SMOOTH ESP system!")
-
--- ==================== НАСТРОЙКИ ПО УМОЛЧАНИЮ ====================
+-- ==================== НАСТРОЙКИ ====================
 local DEFAULT_SPEEDHACK_ENABLED = false
 local DEFAULT_INFINITE_JUMP_ENABLED = false
-local DEFAULT_ESP_ENABLED = false
-local DEFAULT_ITEM_ESP_ENABLED = false
 local DEFAULT_AUTOFARM_ENABLED = false
 local DEFAULT_AUTO_PICKUP_ENABLED = false
-local DEFAULT_BOX_ENABLED = true
-local DEFAULT_CHAMS_ENABLED = true
-local DEFAULT_HEALTH_ENABLED = true
-local DEFAULT_DISTANCE_ENABLED = true
-local DEFAULT_NAME_ENABLED = true
 local DEFAULT_NOCLIP_ENABLED = false
-local DEFAULT_STAND_CONTROL_ENABLED = false
+local DEFAULT_ITEM_ESP_ENABLED = false
 
 local DEFAULT_SPEED = 200
 local DEFAULT_INFINITE_JUMP_BOOST = 50
+local DEFAULT_FLIGHT_SPEED = 120
 
 local MIN_SPEED = 50
 local MAX_SPEED = 500
-
-local DEFAULT_BOX_COLOR = Color3.fromRGB(255, 0, 0)
-local DEFAULT_CHAMS_COLOR = Color3.fromRGB(255, 0, 0)
-local DEFAULT_ITEM_COLOR = Color3.fromRGB(0, 255, 255)
-local DEFAULT_TEAM_CHECK = true
 
 -- ==================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====================
 local speedhackEnabled = DEFAULT_SPEEDHACK_ENABLED
@@ -300,71 +103,247 @@ local infiniteJumpEnabled = DEFAULT_INFINITE_JUMP_ENABLED
 local autoFarmEnabled = DEFAULT_AUTOFARM_ENABLED
 local autoPickupEnabled = DEFAULT_AUTO_PICKUP_ENABLED
 local noclipEnabled = DEFAULT_NOCLIP_ENABLED
-local standControlEnabled = DEFAULT_STAND_CONTROL_ENABLED
+local itemEspEnabled = DEFAULT_ITEM_ESP_ENABLED
 
 local currentSpeed = DEFAULT_SPEED
 local currentInfiniteJumpBoost = DEFAULT_INFINITE_JUMP_BOOST
+local flightSpeed = DEFAULT_FLIGHT_SPEED
 
-local espEnabled = DEFAULT_ESP_ENABLED
-local itemEspEnabled = DEFAULT_ITEM_ESP_ENABLED
-local boxEnabled = DEFAULT_BOX_ENABLED
-local chamsEnabled = DEFAULT_CHAMS_ENABLED
-local healthEnabled = DEFAULT_HEALTH_ENABLED
-local distanceEnabled = DEFAULT_DISTANCE_ENABLED
-local nameEnabled = DEFAULT_NAME_ENABLED
-local boxColor = DEFAULT_BOX_COLOR
-local chamsColor = DEFAULT_CHAMS_COLOR
-local itemColor = DEFAULT_ITEM_COLOR
-local teamCheck = DEFAULT_TEAM_CHECK
-
-local originalGravity = nil
-local espObjects = {}
-local chamsObjects = {}
+-- ESP настройки
+local itemColor = Color3.fromRGB(0, 255, 255)
+local itemMaxDistance = 1000
+local nameEnabled = true
+local distanceEnabled = true
 
 -- AutoFarm переменные
 local autoFarmThread = nil
-local processedItems = {}
-local isTeleporting = false
-local pickupDistance = 15
-local teleportMethod = "Velocity"
-local teleportSpeed = 0.3
-local flightSpeed = 110
-
--- Item ESP переменные
-local itemMaxDistance = 1000
-local itemEspObjects = {}
-
--- NoClip переменные
+local isMovingToItem = false
+local currentMoveConnection = nil
+local autoFarmNoclip = false
 local noclipConnection = nil
 
--- Velocity флаги
-local isMovingToItem = false
-local currentBodyVelocity = nil
-local currentMoveConnection = nil
+-- Кеш предметов
+local itemCache = {}
+local lastCacheUpdate = 0
+local CACHE_UPDATE_INTERVAL = 3
 
--- Конфиги
-local CONFIG_FOLDER = "SimforeaHubConfigs"
-local currentConfig = "default"
+-- Item ESP объекты
+local itemEspObjects = {}
 
--- Создаём папку для конфигов
-if not isfolder(CONFIG_FOLDER) then
-    pcall(function() makefolder(CONFIG_FOLDER) end)
+-- ==================== СИСТЕМА ПОИСКА ПРЕДМЕТОВ ====================
+
+local function updateItemCache()
+    local items = {}
+    
+    local itemSpawns = workspace:FindFirstChild("Item_Spawns")
+    if itemSpawns then
+        local itemsFolder = itemSpawns:FindFirstChild("Items")
+        if itemsFolder then
+            for _, item in ipairs(itemsFolder:GetChildren()) do
+                if item:IsA("Model") then
+                    local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt and prompt.ObjectText and prompt.ObjectText ~= "" then
+                        table.insert(items, item)
+                    end
+                end
+            end
+        end
+    end
+    
+    itemCache = items
+    lastCacheUpdate = tick()
+    
+    if #items > 0 then
+        print("[Simforea] Found " .. #items .. " items")
+    end
+    return items
 end
 
--- Запускаем Magnitude Bypass после загрузки персонажа
-Players.LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    setupMagnitudeBypass()
-end)
+local function getAllItemModels()
+    if tick() - lastCacheUpdate > CACHE_UPDATE_INTERVAL then
+        updateItemCache()
+    end
+    return itemCache
+end
 
-if Players.LocalPlayer.Character then
-    task.spawn(function()
-        task.wait(1)
-        setupMagnitudeBypass()
-    end)
+local function getItemPosition(itemModel)
+    if not itemModel then return nil end
+    
+    if itemModel.PrimaryPart then
+        return itemModel.PrimaryPart.Position
+    end
+    
+    local handle = itemModel:FindFirstChild("Handle")
+    if handle and handle:IsA("BasePart") then
+        return handle.Position
+    end
+    
+    for _, part in ipairs(itemModel:GetDescendants()) do
+        if part:IsA("BasePart") then
+            return part.Position
+        end
+    end
+    
+    return nil
+end
+
+local function getItemPrompt(itemModel)
+    if not itemModel then return nil end
+    return itemModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+end
+
+local function getItemName(itemModel)
+    local prompt = getItemPrompt(itemModel)
+    if prompt and prompt.ObjectText and prompt.ObjectText ~= "" then
+        return prompt.ObjectText
+    end
+    return itemModel.Name or "Unknown Item"
+end
+
+local function isItemValid(itemModel)
+    if not itemModel or not itemModel.Parent then
+        return false
+    end
+    local prompt = getItemPrompt(itemModel)
+    if prompt and prompt.Enabled == false then
+        return false
+    end
+    return true
+end
+
+local function getItemPart(itemModel)
+    if not itemModel then return nil end
+    
+    if itemModel.PrimaryPart then
+        return itemModel.PrimaryPart
+    end
+    
+    local handle = itemModel:FindFirstChild("Handle")
+    if handle and handle:IsA("BasePart") then
+        return handle
+    end
+    
+    for _, part in ipairs(itemModel:GetDescendants()) do
+        if part:IsA("BasePart") then
+            return part
+        end
+    end
+    
+    return nil
+end
+
+-- ==================== ITEM ESP ====================
+if hasDrawing then
+    function createItemESPObject(itemModel)
+        if itemEspObjects[itemModel] then return end
+        
+        local name = getItemName(itemModel)
+        
+        local nameLabel = Drawing.new("Text")
+        nameLabel.Size = 13
+        nameLabel.Center = true
+        nameLabel.Outline = true
+        nameLabel.Color = itemColor
+        nameLabel.Text = name
+        nameLabel.Visible = false
+        
+        local distanceLabel = Drawing.new("Text")
+        distanceLabel.Size = 11
+        distanceLabel.Center = true
+        distanceLabel.Outline = true
+        distanceLabel.Color = Color3.fromRGB(200, 200, 200)
+        distanceLabel.Visible = false
+        
+        itemEspObjects[itemModel] = {
+            nameLabel = nameLabel,
+            distanceLabel = distanceLabel,
+            model = itemModel
+        }
+    end
+
+    function removeItemESP(itemModel)
+        local obj = itemEspObjects[itemModel]
+        if not obj then return end
+        if obj.nameLabel then obj.nameLabel:Remove() end
+        if obj.distanceLabel then obj.distanceLabel:Remove() end
+        itemEspObjects[itemModel] = nil
+    end
+
+    function updateItemESP()
+        if not itemEspEnabled then
+            for itemModel, _ in pairs(itemEspObjects) do
+                removeItemESP(itemModel)
+            end
+            return
+        end
+
+        local player = Players.LocalPlayer
+        if not player or not player.Character then return end
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        local items = getAllItemModels()
+        
+        for _, itemModel in ipairs(items) do
+            if isItemValid(itemModel) then
+                local itemPos = getItemPosition(itemModel)
+                if itemPos then
+                    local distance = (root.Position - itemPos).Magnitude
+                    
+                    if distance <= itemMaxDistance then
+                        if not itemEspObjects[itemModel] then
+                            createItemESPObject(itemModel)
+                        end
+
+                        local obj = itemEspObjects[itemModel]
+                        if obj then
+                            local pos, onScreen = Camera:WorldToViewportPoint(itemPos)
+                            
+                            if onScreen then
+                                if nameEnabled then
+                                    obj.nameLabel.Position = Vector2.new(pos.X, pos.Y - 25)
+                                    obj.nameLabel.Visible = true
+                                else
+                                    obj.nameLabel.Visible = false
+                                end
+                                
+                                if distanceEnabled then
+                                    obj.distanceLabel.Text = string.format("%.0f", distance)
+                                    obj.distanceLabel.Position = Vector2.new(pos.X, pos.Y - 10)
+                                    obj.distanceLabel.Visible = true
+                                else
+                                    obj.distanceLabel.Visible = false
+                                end
+                            else
+                                obj.nameLabel.Visible = false
+                                obj.distanceLabel.Visible = false
+                            end
+                        end
+                    else
+                        if itemEspObjects[itemModel] then
+                            local obj = itemEspObjects[itemModel]
+                            if obj then
+                                obj.nameLabel.Visible = false
+                                obj.distanceLabel.Visible = false
+                            end
+                        end
+                    end
+                end
+            else
+                if itemEspObjects[itemModel] then
+                    removeItemESP(itemModel)
+                end
+            end
+        end
+    end
+else
+    createItemESPObject = function() end
+    removeItemESP = function() end
+    updateItemESP = function() end
 end
 
 -- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
 local function safeNotify(title, content, duration)
     pcall(function()
         Rayfield:Notify({
@@ -373,14 +352,10 @@ local function safeNotify(title, content, duration)
             Duration = duration or 3
         })
     end)
+    print("[Simforea] " .. title .. ": " .. content)
 end
 
 local function stopCurrentMovement()
-    if currentBodyVelocity and currentBodyVelocity.Parent then
-        pcall(function() currentBodyVelocity:Destroy() end)
-        currentBodyVelocity = nil
-    end
-    
     if currentMoveConnection then
         pcall(function() currentMoveConnection:Disconnect() end)
         currentMoveConnection = nil
@@ -393,296 +368,269 @@ local function stopCurrentMovement()
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
         end
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
     end
     
     isMovingToItem = false
 end
 
--- ==================== ФУНКЦИИ ДЛЯ РАБОТЫ С ПРЕДМЕТАМИ ====================
+-- ==================== АВТОФАРМ ====================
 
--- ОПТИМИЗИРОВАННОЕ получение позиции промпта
-local function getPromptPosition(prompt)
-    local parent = prompt.Parent
+local function getClosestItem()
+    local player = Players.LocalPlayer
+    if not player or not player.Character then return nil, nil, nil end
     
-    if not parent then
-        return nil
-    end
+    local root = player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil, nil, nil end
     
-    if parent:IsA("Attachment") then
-        parent = parent.Parent
-    end
+    local closestItem = nil
+    local closestDistance = math.huge
+    local closestPrompt = nil
     
-    if parent:IsA("BasePart") then
-        return parent.Position
-    end
+    local items = getAllItemModels()
     
-    if parent:IsA("Model") then
-        if parent.PrimaryPart then
-            return parent.PrimaryPart.Position
-        end
-        
-        local hrp = parent:FindFirstChildWhichIsA("BasePart")
-        if hrp then
-            return hrp.Position
-        end
-    end
-    
-    return nil
-end
-
--- Получение родительской части для телепортации
-local function getPromptPart(prompt)
-    local parent = prompt.Parent
-    if not parent then return nil end
-    
-    if parent:IsA("BasePart") then
-        return parent
-    end
-    
-    if parent:IsA("Model") then
-        if parent.PrimaryPart then
-            return parent.PrimaryPart
-        end
-        
-        for _, child in ipairs(parent:GetDescendants()) do
-            if child:IsA("BasePart") then
-                return child
+    for _, item in ipairs(items) do
+        if isItemValid(item) then
+            local itemPos = getItemPosition(item)
+            if itemPos then
+                local distance = (root.Position - itemPos).Magnitude
+                
+                if distance < closestDistance then
+                    closestItem = item
+                    closestDistance = distance
+                    closestPrompt = getItemPrompt(item)
+                end
             end
         end
     end
     
-    return nil
+    return closestItem, closestPrompt, closestDistance
 end
 
--- Получение названия предмета из промпта
-local function getItemNameFromPrompt(prompt)
-    if prompt and prompt.ObjectText and prompt.ObjectText ~= "" then
-        return prompt.ObjectText
-    end
-    return "Unknown Item"
-end
-
--- Поиск ближайшего предмета для авто-подбора
-local function getClosestItem()
-    local player = Players.LocalPlayer
-    if not player or not player.Character then return nil end
-    local root = player.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    
-    local closestPrompt = nil
-    local shortestDistance = pickupDistance
-    
-    for prompt in pairs(CachedPrompts) do
-        if prompt.MaxActivationDistance == 0 then
-            continue
-        end
-        
-        local promptPos = getPromptPosition(prompt)
-        if not promptPos then continue end
-        
-        local distance = (root.Position - promptPos).Magnitude
-        if distance < shortestDistance then
-            closestPrompt = prompt
-            shortestDistance = distance
-        end
+local function moveToItem(itemPart)
+    if isMovingToItem then 
+        return false 
     end
     
-    return closestPrompt
-end
-
--- Поиск ближайшего предмета для телепортации (автофарм)
-local function getClosestItemForTeleport()
-    local player = Players.LocalPlayer
-    if not player or not player.Character then return nil, nil end
-    local root = player.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return nil, nil end
+    stopCurrentMovement()
     
-    local closestPrompt = nil
-    local closestDistance = math.huge
-    local closestPart = nil
-    
-    for prompt in pairs(CachedPrompts) do
-        if processedItems[prompt] then continue end
-        if prompt.MaxActivationDistance == 0 then continue end
-        
-        local part = getPromptPart(prompt)
-        if not part then continue end
-        
-        local promptPos = getPromptPosition(prompt)
-        if not promptPos then continue end
-        
-        local distance = (root.Position - promptPos).Magnitude
-        if distance < closestDistance then
-            closestPrompt = prompt
-            closestDistance = distance
-            closestPart = part
-        end
+    local character = Players.LocalPlayer.Character
+    if not character then 
+        return false 
     end
     
-    return closestPrompt, closestPart
-end
-
--- Сбор предмета
-local function collectItem(prompt, part)
-    if teleportMethod == "Velocity" then
-        return moveToItemBodyVelocity(part)
-    elseif teleportMethod == "Tween (Smooth)" then
-        local character = Players.LocalPlayer.Character
-        if not character then return false end
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return false end
-        
-        local targetPos = part.Position
-        local tween = TweenService:Create(hrp, TweenInfo.new(teleportSpeed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
-        tween:Play()
-        tween.Completed:Wait()
-        return true
-    else
-        local character = Players.LocalPlayer.Character
-        if not character then return false end
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return false end
-        
-        hrp.CFrame = part.CFrame
-        return true
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then 
+        return false 
     end
-end
-
--- ==================== СИСТЕМА КОНФИГОВ ====================
-local function saveConfig(name)
-    local data = {
-        version = 2,
-        speedhackEnabled = speedhackEnabled,
-        currentSpeed = currentSpeed,
-        infiniteJumpEnabled = infiniteJumpEnabled,
-        currentInfiniteJumpBoost = currentInfiniteJumpBoost,
-        noclipEnabled = noclipEnabled,
-        standControlEnabled = standControlEnabled,
-        autoFarmEnabled = autoFarmEnabled,
-        autoPickupEnabled = autoPickupEnabled,
-        pickupDistance = pickupDistance,
-        teleportMethod = teleportMethod,
-        flightSpeed = flightSpeed,
-        teleportSpeed = teleportSpeed,
-        espEnabled = espEnabled,
-        itemEspEnabled = itemEspEnabled,
-        boxEnabled = boxEnabled,
-        chamsEnabled = chamsEnabled,
-        healthEnabled = healthEnabled,
-        distanceEnabled = distanceEnabled,
-        nameEnabled = nameEnabled,
-        teamCheck = teamCheck,
-        boxColor = {boxColor.R, boxColor.G, boxColor.B},
-        chamsColor = {chamsColor.R, chamsColor.G, chamsColor.B},
-        itemColor = {itemColor.R, itemColor.G, itemColor.B},
-        itemMaxDistance = itemMaxDistance,
-        theme = Window and Window.CurrentTheme or "Default"
-    }
     
-    local success, err = pcall(function()
-        writefile(CONFIG_FOLDER .. "/" .. name .. ".json", HttpService:JSONEncode(data))
-    end)
-    
-    if success then
-        safeNotify("Config", "Saved: " .. name, 2)
-    else
-        safeNotify("Config", "Failed to save: " .. name, 2)
-    end
-end
-
-local function loadConfig(name)
-    local path = CONFIG_FOLDER .. "/" .. name .. ".json"
-    
-    if not isfile(path) then
-        safeNotify("Config", "Config not found: " .. name, 2)
+    if not itemPart or not itemPart.Parent then
         return false
     end
     
-    local success, data = pcall(function()
-        return HttpService:JSONDecode(readfile(path))
+    local finished = false
+    local success = false
+    
+    isMovingToItem = true
+    
+    local oldSpeedhack = speedhackEnabled
+    speedhackEnabled = false
+    
+    autoFarmNoclip = true
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid.PlatformStand = true
+    end
+    
+    local timeout = 15
+    local startTime = tick()
+    local lastTargetUpdate = 0
+    local currentTargetPos = itemPart.Position
+    
+    currentMoveConnection = RunService.Heartbeat:Connect(function()
+        if not isMovingToItem then
+            finished = true
+            success = false
+            return
+        end
+        
+        if not rootPart or not rootPart.Parent then
+            finished = true
+            success = false
+            return
+        end
+        
+        if tick() - startTime > timeout then
+            finished = true
+            success = false
+            return
+        end
+        
+        if tick() - lastTargetUpdate > 0.2 then
+            if itemPart and itemPart.Parent then
+                currentTargetPos = itemPart.Position
+            else
+                finished = true
+                success = false
+                return
+            end
+            lastTargetUpdate = tick()
+        end
+        
+        local delta = currentTargetPos - rootPart.Position
+        local distance = delta.Magnitude
+        
+        if distance < 15 then
+            finished = true
+            success = true
+            return
+        end
+        
+        local direction = delta.Unit
+        rootPart.AssemblyLinearVelocity = direction * flightSpeed
     end)
     
-    if not success then
-        safeNotify("Config", "Failed to load: " .. name, 2)
-        return false
+    repeat
+        task.wait()
+    until finished
+    
+    if rootPart and rootPart.Parent then
+        rootPart.AssemblyLinearVelocity = Vector3.zero
+        rootPart.AssemblyAngularVelocity = Vector3.zero
     end
     
-    speedhackEnabled = data.speedhackEnabled
-    currentSpeed = data.currentSpeed
-    infiniteJumpEnabled = data.infiniteJumpEnabled
-    currentInfiniteJumpBoost = data.currentInfiniteJumpBoost
-    noclipEnabled = data.noclipEnabled
-    standControlEnabled = data.standControlEnabled or false
-    autoFarmEnabled = data.autoFarmEnabled
-    autoPickupEnabled = data.autoPickupEnabled
-    pickupDistance = data.pickupDistance
-    teleportMethod = data.teleportMethod
-    flightSpeed = data.flightSpeed
-    teleportSpeed = data.teleportSpeed
-    espEnabled = data.espEnabled
-    itemEspEnabled = data.itemEspEnabled
-    boxEnabled = data.boxEnabled
-    chamsEnabled = data.chamsEnabled
-    healthEnabled = data.healthEnabled
-    distanceEnabled = data.distanceEnabled
-    nameEnabled = data.nameEnabled
-    teamCheck = data.teamCheck
-    
-    if data.boxColor then
-        boxColor = Color3.fromRGB(data.boxColor[1]*255, data.boxColor[2]*255, data.boxColor[3]*255)
-    end
-    if data.chamsColor then
-        chamsColor = Color3.fromRGB(data.chamsColor[1]*255, data.chamsColor[2]*255, data.chamsColor[3]*255)
-    end
-    if data.itemColor then
-        itemColor = Color3.fromRGB(data.itemColor[1]*255, data.itemColor[2]*255, data.itemColor[3]*255)
+    if currentMoveConnection then
+        pcall(function() currentMoveConnection:Disconnect() end)
+        currentMoveConnection = nil
     end
     
-    itemMaxDistance = data.itemMaxDistance or 1000
-    
-    if data.theme and Window and Window.ModifyTheme then
-        pcall(function() Window.ModifyTheme(data.theme) end)
+    if humanoid then
+        humanoid.PlatformStand = false
     end
     
-    if noclipEnabled then
-        startNoclip()
-    else
-        stopNoclip()
-    end
+    autoFarmNoclip = false
+    speedhackEnabled = oldSpeedhack
     
-    if standControlEnabled then
-        controlStand(true)
-    else
-        controlStand(false)
-    end
+    isMovingToItem = false
     
-    safeNotify("Config", "Loaded: " .. name, 2)
-    return true
+    return success
 end
 
-local function listConfigs()
-    local configs = {}
-    if not isfolder(CONFIG_FOLDER) then return configs end
-    for _, file in ipairs(listfiles(CONFIG_FOLDER)) do
-        local name = file:match("([^/]+)%.json$")
-        if name then
-            table.insert(configs, name)
+local function collectItem(itemModel, itemPart, itemPrompt)
+    if not itemPart then return false end
+    
+    local success = moveToItem(itemPart)
+    
+    if success and itemPrompt then
+        task.wait(0.1)
+        pcall(function()
+            fireproximityprompt(itemPrompt, 0.5)
+        end)
+        task.wait(0.15)
+        pcall(function()
+            fireproximityprompt(itemPrompt, 0.5)
+        end)
+        return true
+    end
+    
+    return false
+end
+
+function startAutoFarm()
+    if autoFarmThread then
+        return
+    end
+    
+    autoFarmEnabled = true
+    
+    safeNotify("Auto Farm", "Started! Speed: " .. flightSpeed .. " studs/s", 4)
+    print("[AutoFarm] Started with speed: " .. flightSpeed)
+    
+    autoFarmThread = task.spawn(function()
+        local lastItemCheck = 0
+        local CHECK_INTERVAL = 2.5
+        
+        while autoFarmEnabled do
+            local currentTime = tick()
+            
+            if currentTime - lastItemCheck >= CHECK_INTERVAL then
+                local item, prompt, distance = getClosestItem()
+                
+                if item and prompt then
+                    if not isMovingToItem then
+                        local itemName = getItemName(item)
+                        local itemPart = getItemPart(item)
+                        
+                        if itemPart and isItemValid(item) then
+                            print(string.format("[AutoFarm] Found: %s (%.0f studs)", itemName, distance))
+                            safeNotify("Auto Farm", "Moving to: " .. itemName, 2)
+                            
+                            local success = collectItem(item, itemPart, prompt)
+                            
+                            if success then
+                                print("[AutoFarm] Collected: " .. itemName)
+                                safeNotify("Auto Farm", "Collected: " .. itemName, 2)
+                                updateItemCache()
+                            end
+                            
+                            task.wait(0.5)
+                        end
+                    end
+                end
+                
+                lastItemCheck = currentTime
+            end
+            
+            task.wait(0.1)
         end
-    end
-    return configs
+        
+        print("[AutoFarm] Stopped")
+        stopCurrentMovement()
+        autoFarmThread = nil
+    end)
 end
 
-local function deleteConfig(name)
-    local path = CONFIG_FOLDER .. "/" .. name .. ".json"
-    if isfile(path) then
-        pcall(function() delfile(path) end)
-        safeNotify("Config", "Deleted: " .. name, 2)
-    else
-        safeNotify("Config", "Config not found: " .. name, 2)
-    end
+function stopAutoFarm()
+    autoFarmEnabled = false
+    stopCurrentMovement()
+    autoFarmThread = nil
+    
+    safeNotify("Auto Farm", "Stopped!", 3)
+    print("[AutoFarm] Stopped")
 end
 
--- ==================== NOCLIP ФУНКЦИИ ====================
+-- Auto Pickup
+task.spawn(function()
+    while true do
+        if autoPickupEnabled then
+            local items = getAllItemModels()
+            local player = Players.LocalPlayer
+            if player and player.Character then
+                local root = player.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    for _, item in ipairs(items) do
+                        if isItemValid(item) then
+                            local itemPos = getItemPosition(item)
+                            if itemPos and (root.Position - itemPos).Magnitude < 20 then
+                                local prompt = getItemPrompt(item)
+                                if prompt then
+                                    pcall(function() fireproximityprompt(prompt, 0.5) end)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- ==================== NOCLIP ====================
 local function startNoclip()
     if noclipConnection then
         noclipConnection:Disconnect()
@@ -690,20 +638,16 @@ local function startNoclip()
     end
     
     noclipConnection = RunService.Heartbeat:Connect(function()
-        if not noclipEnabled then
-            return
-        end
-        
-        local character = Players.LocalPlayer.Character
-        if not character then
-            return
-        end
-        
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                pcall(function()
-                    part.CanCollide = false
-                end)
+        if noclipEnabled or autoFarmNoclip then
+            local character = Players.LocalPlayer.Character
+            if character then
+                for _, part in ipairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        pcall(function()
+                            part.CanCollide = false
+                        end)
+                    end
+                end
             end
         end
     end)
@@ -722,502 +666,6 @@ local function stopNoclip()
                 pcall(function()
                     part.CanCollide = true
                 end)
-            end
-        end
-    end
-end
-
--- ==================== BODYVELOCITY MOVE ====================
-local function moveToItemBodyVelocity(part)
-    if isMovingToItem then 
-        return false 
-    end
-    
-    stopCurrentMovement()
-    
-    local character = Players.LocalPlayer.Character
-    if not character then 
-        return false 
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then 
-        return false 
-    end
-    
-    local targetPos = part.Position
-    local finished = false
-    local success = false
-    
-    isMovingToItem = true
-    
-    local oldSpeedhack = speedhackEnabled
-    speedhackEnabled = false
-    
-    local oldNoclip = noclipEnabled
-    if not noclipEnabled then
-        noclipEnabled = true
-        startNoclip()
-    end
-    
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bv.P = 25000
-    bv.Parent = hrp
-    currentBodyVelocity = bv
-    
-    local timeout = 10
-    local startTime = tick()
-    
-    currentMoveConnection = RunService.Heartbeat:Connect(function()
-        if not isMovingToItem then
-            finished = true
-            success = false
-            return
-        end
-        
-        if not hrp or not hrp.Parent then
-            finished = true
-            success = false
-            return
-        end
-        
-        if tick() - startTime > timeout then
-            finished = true
-            success = false
-            return
-        end
-        
-        if part and part.Parent then
-            targetPos = part.Position
-        end
-        
-        local delta = targetPos - hrp.Position
-        local distance = delta.Magnitude
-        
-        if distance < 3 then
-            finished = true
-            success = true
-            return
-        end
-        
-        local currentSpeed = math.clamp(distance * 1.5, 25, flightSpeed)
-        bv.Velocity = delta.Unit * currentSpeed
-    end)
-    
-    repeat
-        task.wait()
-    until finished
-    
-    stopCurrentMovement()
-    
-    if hrp and hrp.Parent then
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-    end
-    
-    if not oldNoclip then
-        noclipEnabled = false
-        stopNoclip()
-    end
-    
-    speedhackEnabled = oldSpeedhack
-    
-    return success
-end
-
--- ==================== ITEM ESP (ПЛАВНЫЙ 60 FPS) ====================
-if hasDrawing then
-    function createItemESPObject(prompt)
-        if itemEspObjects[prompt] then return end
-        
-        local name = getItemNameFromPrompt(prompt)
-        
-        local nameLabel = Drawing.new("Text")
-        nameLabel.Size = 13
-        nameLabel.Center = true
-        nameLabel.Outline = true
-        nameLabel.Color = itemColor
-        nameLabel.Text = name
-        nameLabel.Visible = false
-        
-        local distanceLabel = Drawing.new("Text")
-        distanceLabel.Size = 11
-        distanceLabel.Center = true
-        distanceLabel.Outline = true
-        distanceLabel.Color = Color3.fromRGB(200, 200, 200)
-        distanceLabel.Visible = false
-        
-        itemEspObjects[prompt] = {
-            nameLabel = nameLabel,
-            distanceLabel = distanceLabel
-        }
-    end
-
-    function removeItemESP(prompt)
-        local obj = itemEspObjects[prompt]
-        if not obj then return end
-        if obj.nameLabel then obj.nameLabel:Remove() end
-        if obj.distanceLabel then obj.distanceLabel:Remove() end
-        itemEspObjects[prompt] = nil
-    end
-
-    function updateItemESP()
-        if not itemEspEnabled then
-            for prompt, _ in pairs(itemEspObjects) do
-                removeItemESP(prompt)
-            end
-            return
-        end
-
-        local player = Players.LocalPlayer
-        if not player or not player.Character then return end
-        local root = player.Character:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-
-        for prompt in pairs(CachedPrompts) do
-            if prompt.MaxActivationDistance == 0 then
-                if itemEspObjects[prompt] then
-                    removeItemESP(prompt)
-                end
-                continue
-            end
-            
-            local promptPos = getPromptPosition(prompt)
-            if not promptPos then 
-                if itemEspObjects[prompt] then
-                    local obj = itemEspObjects[prompt]
-                    if obj.nameLabel then obj.nameLabel.Visible = false end
-                    if obj.distanceLabel then obj.distanceLabel.Visible = false end
-                end
-                continue 
-            end
-
-            local distance = (root.Position - promptPos).Magnitude
-            local isVisible = distance <= itemMaxDistance
-            
-            if not isVisible then
-                if itemEspObjects[prompt] then
-                    local obj = itemEspObjects[prompt]
-                    if obj.nameLabel then obj.nameLabel.Visible = false end
-                    if obj.distanceLabel then obj.distanceLabel.Visible = false end
-                end
-                continue
-            end
-
-            if not itemEspObjects[prompt] then
-                createItemESPObject(prompt)
-            end
-
-            local obj = itemEspObjects[prompt]
-            local pos, onScreen = Camera:WorldToViewportPoint(promptPos)
-            
-            if onScreen then
-                if nameEnabled then
-                    obj.nameLabel.Position = Vector2.new(pos.X, pos.Y - 25)
-                    obj.nameLabel.Visible = true
-                else
-                    obj.nameLabel.Visible = false
-                end
-                
-                if distanceEnabled then
-                    obj.distanceLabel.Text = string.format("%.0f studs", distance)
-                    obj.distanceLabel.Position = Vector2.new(pos.X, pos.Y - 10)
-                    obj.distanceLabel.Visible = true
-                else
-                    obj.distanceLabel.Visible = false
-                end
-            else
-                obj.nameLabel.Visible = false
-                obj.distanceLabel.Visible = false
-            end
-        end
-    end
-else
-    createItemESPObject = function() end
-    removeItemESP = function() end
-    updateItemESP = function() end
-end
-
--- ==================== ФУНКЦИИ АВТОФАРМА ====================
-
--- Auto Pickup цикл
-task.spawn(function()
-    while true do
-        if autoPickupEnabled then
-            local prompt = getClosestItem()
-            if prompt then
-                pcall(function()
-                    fireproximityprompt(prompt)
-                end)
-            end
-        end
-        task.wait(0.2)
-    end
-end)
-
--- Auto Farm функция
-function startAutoFarm()
-    if autoFarmThread and coroutine.status(autoFarmThread) ~= "dead" then
-        return
-    end
-    
-    autoFarmEnabled = true
-    processedItems = {}
-    isTeleporting = false
-    
-    autoFarmThread = task.spawn(function()
-        while autoFarmEnabled do
-            local prompt, part = getClosestItemForTeleport()
-            
-            if prompt and part then
-                if not isTeleporting then
-                    isTeleporting = true
-                    local itemName = getItemNameFromPrompt(prompt)
-                    
-                    local success = collectItem(prompt, part)
-                    
-                    if success then
-                        task.wait(0.2)
-                        pcall(function()
-                            fireproximityprompt(prompt)
-                        end)
-                        
-                        processedItems[prompt] = true
-                        
-                        task.delay(2, function()
-                            processedItems[prompt] = nil
-                        end)
-                        
-                        safeNotify("Auto Farm", "Collected: " .. itemName, 2)
-                    end
-                    
-                    isTeleporting = false
-                    task.wait(0.3)
-                end
-            else
-                if next(processedItems) then
-                    processedItems = {}
-                end
-                task.wait(0.5)
-            end
-        end
-        
-        stopCurrentMovement()
-        autoFarmThread = nil
-    end)
-    
-    safeNotify("Auto Farm", "Started! Mode: " .. teleportMethod, 3)
-end
-
-function stopAutoFarm()
-    autoFarmEnabled = false
-    stopCurrentMovement()
-    
-    if autoFarmThread then
-        pcall(function() coroutine.close(autoFarmThread) end)
-        autoFarmThread = nil
-    end
-    
-    isTeleporting = false
-    processedItems = {}
-    
-    local character = Players.LocalPlayer.Character
-    if character then
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-        end
-    end
-    
-    safeNotify("Auto Farm", "Stopped!", 3)
-end
-
--- ==================== ESP ИГРОКОВ ====================
-local function getPlayerTeam(player)
-    return player and player.Team
-end
-
-local function getPlayerColor(plr)
-    if not teamCheck then
-        return boxColor
-    end
-    local localPlayer = Players.LocalPlayer
-    if not localPlayer then return boxColor end
-    local localTeam = getPlayerTeam(localPlayer)
-    local playerTeam = getPlayerTeam(plr)
-    if localTeam and playerTeam and localTeam == playerTeam then
-        return Color3.fromRGB(0, 255, 0)
-    else
-        return chamsEnabled and chamsColor or boxColor
-    end
-end
-
-local function updateChamsForPlayer(player)
-    local character = player.Character
-    if not character then return end
-    if chamsObjects[player] and chamsObjects[player].highlight then
-        chamsObjects[player].highlight:Destroy()
-        chamsObjects[player] = nil
-    end
-    if chamsEnabled and espEnabled and character then
-        local highlight = Instance.new("Highlight")
-        highlight.Parent = character
-        highlight.FillColor = getPlayerColor(player)
-        highlight.OutlineColor = getPlayerColor(player)
-        highlight.FillTransparency = 0.5
-        highlight.OutlineTransparency = 0.3
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        chamsObjects[player] = { highlight = highlight }
-    end
-end
-
-local function getCharacterSize(character)
-    if not character then return 5, 5 end
-    local extents = character:GetExtentsSize()
-    return math.max(extents.X, 2), math.max(extents.Y, 5)
-end
-
-local function createESPObject(player)
-    if espObjects[player] then return end
-    local objects = {
-        box = Drawing.new("Square"),
-        healthBar = Drawing.new("Line"),
-        nameLabel = Drawing.new("Text"),
-        distanceLabel = Drawing.new("Text"),
-        healthText = Drawing.new("Text")
-    }
-    objects.box.Thickness = 2
-    objects.box.Filled = false
-    objects.box.Color = getPlayerColor(player)
-    objects.box.Visible = false
-
-    objects.healthBar.Thickness = 3
-    objects.healthBar.Color = Color3.fromRGB(0, 255, 0)
-    objects.healthBar.Visible = false
-
-    objects.nameLabel.Size = 14
-    objects.nameLabel.Center = true
-    objects.nameLabel.Outline = true
-    objects.nameLabel.Color = Color3.fromRGB(255, 255, 255)
-    objects.nameLabel.Visible = false
-
-    objects.distanceLabel.Size = 12
-    objects.distanceLabel.Center = true
-    objects.distanceLabel.Outline = true
-    objects.distanceLabel.Color = Color3.fromRGB(200, 200, 200)
-    objects.distanceLabel.Visible = false
-
-    objects.healthText.Size = 11
-    objects.healthText.Center = true
-    objects.healthText.Outline = true
-    objects.healthText.Color = Color3.fromRGB(255, 255, 255)
-    objects.healthText.Visible = false
-
-    espObjects[player] = objects
-end
-
-local function updatePlayerESP()
-    if not espEnabled then return end
-    local localPlayer = Players.LocalPlayer
-    if not localPlayer or not localPlayer.Character then return end
-    local localRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not localRoot then return end
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == localPlayer then continue end
-        local character = player.Character
-        if character and character:FindFirstChild("HumanoidRootPart") and character:FindFirstChild("Humanoid") then
-            local rootPart = character.HumanoidRootPart
-            local humanoid = character.Humanoid
-
-            if chamsEnabled and espEnabled then
-                if not chamsObjects[player] then
-                    updateChamsForPlayer(player)
-                elseif chamsObjects[player] and chamsObjects[player].highlight then
-                    chamsObjects[player].highlight.FillColor = getPlayerColor(player)
-                    chamsObjects[player].highlight.OutlineColor = getPlayerColor(player)
-                end
-            elseif not chamsEnabled and chamsObjects[player] then
-                if chamsObjects[player].highlight then
-                    chamsObjects[player].highlight:Destroy()
-                end
-                chamsObjects[player] = nil
-            end
-
-            if boxEnabled then
-                if not espObjects[player] then
-                    createESPObject(player)
-                end
-                local objects = espObjects[player]
-                if not objects then continue end
-
-                local vector, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-                if onScreen and humanoid.Health > 0 then
-                    local width, height = getCharacterSize(character)
-                    local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
-                    local scale = 300 / math.max(distance, 10)
-                    local boxWidth = width * scale
-                    local boxHeight = height * scale
-                    local boxPosition = Vector2.new(vector.X - boxWidth/2, vector.Y - boxHeight/2)
-                    local boxSize = Vector2.new(boxWidth, boxHeight)
-
-                    objects.box.Color = getPlayerColor(player)
-                    objects.box.Visible = true
-                    objects.box.Size = boxSize
-                    objects.box.Position = boxPosition
-
-                    if healthEnabled and humanoid.MaxHealth > 0 then
-                        local healthPercent = humanoid.Health / humanoid.MaxHealth
-                        local healthBarHeight = boxSize.Y * healthPercent
-                        objects.healthBar.Visible = true
-                        objects.healthBar.From = Vector2.new(boxPosition.X - 5, boxPosition.Y + boxSize.Y - healthBarHeight)
-                        objects.healthBar.To = Vector2.new(boxPosition.X - 5, boxPosition.Y + boxSize.Y)
-                        if healthPercent > 0.5 then
-                            objects.healthBar.Color = Color3.fromRGB(0, 255, 0)
-                        elseif healthPercent > 0.25 then
-                            objects.healthBar.Color = Color3.fromRGB(255, 255, 0)
-                        else
-                            objects.healthBar.Color = Color3.fromRGB(255, 0, 0)
-                        end
-                        objects.healthText.Visible = true
-                        objects.healthText.Text = math.floor(humanoid.Health) .. "/" .. math.floor(humanoid.MaxHealth)
-                        objects.healthText.Position = Vector2.new(vector.X, boxPosition.Y + boxSize.Y + 15)
-                    else
-                        objects.healthBar.Visible = false
-                        objects.healthText.Visible = false
-                    end
-
-                    if nameEnabled then
-                        objects.nameLabel.Visible = true
-                        objects.nameLabel.Text = player.Name
-                        objects.nameLabel.Position = Vector2.new(vector.X, boxPosition.Y - 20)
-                    else
-                        objects.nameLabel.Visible = false
-                    end
-
-                    if distanceEnabled then
-                        objects.distanceLabel.Visible = true
-                        objects.distanceLabel.Text = string.format("%.1f studs", (localRoot.Position - rootPart.Position).Magnitude)
-                        objects.distanceLabel.Position = Vector2.new(vector.X, boxPosition.Y + boxSize.Y + 5)
-                    else
-                        objects.distanceLabel.Visible = false
-                    end
-                else
-                    objects.box.Visible = false
-                    objects.healthBar.Visible = false
-                    objects.nameLabel.Visible = false
-                    objects.distanceLabel.Visible = false
-                    objects.healthText.Visible = false
-                end
-            end
-        else
-            if espObjects[player] then
-                for _, obj in pairs(espObjects[player]) do
-                    if obj and obj.Remove then pcall(obj.Remove, obj) end
-                end
-                espObjects[player] = nil
             end
         end
     end
@@ -1265,51 +713,16 @@ local function updateInfiniteJump()
     end
 end
 
--- ==================== ОЧИСТКА ESP ====================
-local function clearAllESP()
-    for player, objects in pairs(espObjects) do
-        for _, obj in pairs(objects) do
-            if obj and obj.Remove then pcall(obj.Remove, obj) end
-        end
-    end
-    espObjects = {}
-end
-
-local function clearAllChams()
-    for player, chams in pairs(chamsObjects) do
-        if chams and chams.highlight then
-            chams.highlight:Destroy()
-        end
-    end
-    chamsObjects = {}
-end
-
-local function clearAllItemESP()
-    for prompt, _ in pairs(itemEspObjects) do
-        removeItemESP(prompt)
-    end
-end
-
 -- ==================== RAYFIELD UI ====================
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+print("[Simforea] Loading Rayfield...")
 
-local themes = {
-    "Default",
-    "AmberGlow",
-    "Amethyst",
-    "Bloom",
-    "DarkBlue",
-    "Green",
-    "Light",
-    "Ocean",
-    "Serenity"
-}
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
     Name = "Simforea Hub | " .. gameName,
     Icon = 0,
     LoadingTitle = "Simforea Hub",
-    LoadingSubtitle = "Loaded in: " .. gameName .. " (SMOOTH 60FPS ESP)",
+    LoadingSubtitle = "Fixed version",
     Theme = "Default",
     ConfigurationSaving = {
         Enabled = true,
@@ -1319,13 +732,13 @@ local Window = Rayfield:CreateWindow({
     KeySystem = false
 })
 
--- ==================== ВКЛАДКИ ====================
+print("Simforea loaded!")
+
+-- Вкладки
 local MovementTab = Window:CreateTab("Movement", 0)
 local AutoFarmTab = Window:CreateTab("AutoFarm", 0)
 local ESPTab = Window:CreateTab("ESP", 0)
 local ItemsTab = Window:CreateTab("Items", 0)
-local BypassesTab = Window:CreateTab("Bypasses", 0)
-local SettingsTab = Window:CreateTab("Settings", 0)
 local InfoTab = Window:CreateTab("Info", 0)
 
 -- Movement Tab
@@ -1334,6 +747,7 @@ MovementTab:CreateToggle({
     CurrentValue = speedhackEnabled,
     Callback = function(v) speedhackEnabled = v end
 })
+
 MovementTab:CreateSlider({
     Name = "Speed Value",
     Range = {MIN_SPEED, MAX_SPEED},
@@ -1348,6 +762,7 @@ MovementTab:CreateToggle({
     CurrentValue = infiniteJumpEnabled,
     Callback = function(v) infiniteJumpEnabled = v end
 })
+
 MovementTab:CreateSlider({
     Name = "Jump Boost Power",
     Range = {10, 200},
@@ -1366,7 +781,9 @@ MovementTab:CreateToggle({
             startNoclip()
             safeNotify("NoClip", "Enabled!", 2)
         else
-            stopNoclip()
+            if not autoFarmNoclip then
+                stopNoclip()
+            end
             safeNotify("NoClip", "Disabled!", 2)
         end
     end
@@ -1374,17 +791,9 @@ MovementTab:CreateToggle({
 
 -- AutoFarm Tab
 AutoFarmTab:CreateToggle({
-    Name = "Auto Pickup (Range)",
+    Name = "Auto Pickup (20 studs range)",
     CurrentValue = autoPickupEnabled,
     Callback = function(v) autoPickupEnabled = v end
-})
-AutoFarmTab:CreateSlider({
-    Name = "Pickup Range",
-    Range = {5, 50},
-    Increment = 1,
-    Suffix = "studs",
-    CurrentValue = pickupDistance,
-    Callback = function(v) pickupDistance = v end
 })
 
 AutoFarmTab:CreateToggle({
@@ -1399,264 +808,131 @@ AutoFarmTab:CreateToggle({
     end
 })
 
-AutoFarmTab:CreateDropdown({
-    Name = "Movement Method",
-    Options = {"BodyVelocity (Through walls)", "Tween (Smooth)", "Instant (Teleport)"},
-    CurrentOption = "BodyVelocity (Through walls)",
-    Callback = function(opt)
-        if opt == "BodyVelocity (Through walls)" then
-            teleportMethod = "Velocity"
-        elseif opt == "Tween (Smooth)" then
-            teleportMethod = "Tween (Smooth)"
-        else
-            teleportMethod = "Instant"
-        end
-    end
-})
-
 AutoFarmTab:CreateSlider({
-    Name = "Flight Speed (Recommended: 100-140)",
-    Range = {50, 200},
-    Increment = 10,
+    Name = "Flight Speed (studs/s)",
+    Range = {50, 300},
+    Increment = 5,
     Suffix = "studs/s",
     CurrentValue = flightSpeed,
-    Callback = function(v) flightSpeed = v end
-})
-
-AutoFarmTab:CreateSlider({
-    Name = "Tween Speed",
-    Range = {0.1, 2.0},
-    Increment = 0.05,
-    Suffix = "s",
-    CurrentValue = teleportSpeed,
-    Callback = function(v) teleportSpeed = v end
-})
-
--- ESP Tab
-ESPTab:CreateToggle({
-    Name = "Enable Player ESP",
-    CurrentValue = espEnabled,
-    Callback = function(v)
-        espEnabled = v
-        if not v then clearAllESP(); if not chamsEnabled then clearAllChams() end end
+    Callback = function(v) 
+        flightSpeed = v
+        safeNotify("Flight Speed", "Set to: " .. v .. " studs/s", 1)
     end
 })
 
+AutoFarmTab:CreateParagraph({
+    Title = "⚙️ AutoFarm Info",
+    Content = "hell nah"
+})
+
+-- ESP Tab (Item ESP)
 ESPTab:CreateToggle({
-    Name = "Show Box",
-    CurrentValue = boxEnabled,
-    Callback = function(v) boxEnabled = v end
-})
-
-ESPTab:CreateToggle({
-    Name = "Show Chams",
-    CurrentValue = chamsEnabled,
-    Callback = function(v)
-        chamsEnabled = v
-        if not v then clearAllChams() end
-    end
-})
-
-ESPTab:CreateToggle({
-    Name = "Show Health",
-    CurrentValue = healthEnabled,
-    Callback = function(v) healthEnabled = v end
-})
-
-ESPTab:CreateToggle({
-    Name = "Show Distance",
-    CurrentValue = distanceEnabled,
-    Callback = function(v) distanceEnabled = v end
-})
-
-ESPTab:CreateToggle({
-    Name = "Show Name",
-    CurrentValue = nameEnabled,
-    Callback = function(v) nameEnabled = v end
-})
-
-ESPTab:CreateToggle({
-    Name = "Team Check (Green=Team)",
-    CurrentValue = teamCheck,
-    Callback = function(v) teamCheck = v end
-})
-
-ESPTab:CreateColorPicker({
-    Name = "Box Color",
-    Color = boxColor,
-    Callback = function(c) boxColor = c end
-})
-
-ESPTab:CreateColorPicker({
-    Name = "Chams Color",
-    Color = chamsColor,
-    Callback = function(c) chamsColor = c end
-})
-
--- Items Tab
-ItemsTab:CreateToggle({
     Name = "Enable Item ESP",
     CurrentValue = itemEspEnabled,
     Callback = function(v)
         itemEspEnabled = v
-        if not v then clearAllItemESP() end
+        if not v then
+            for itemModel, _ in pairs(itemEspObjects) do
+                removeItemESP(itemModel)
+            end
+        end
     end
 })
-ItemsTab:CreateColorPicker({
+
+ESPTab:CreateColorPicker({
     Name = "Item ESP Color",
     Color = itemColor,
     Callback = function(c)
         itemColor = c
         for _, obj in pairs(itemEspObjects) do
-            if obj.nameLabel then obj.nameLabel.Color = c end
+            if obj.nameLabel then
+                obj.nameLabel.Color = c
+            end
         end
     end
 })
-ItemsTab:CreateToggle({
-    Name = "Show Distance",
-    CurrentValue = distanceEnabled,
-    Callback = function(v) distanceEnabled = v end
-})
-ItemsTab:CreateToggle({
+
+ESPTab:CreateToggle({
     Name = "Show Name",
     CurrentValue = nameEnabled,
     Callback = function(v) nameEnabled = v end
 })
+
+ESPTab:CreateToggle({
+    Name = "Show Distance",
+    CurrentValue = distanceEnabled,
+    Callback = function(v) distanceEnabled = v end
+})
+
+-- Items Tab
 ItemsTab:CreateSlider({
-    Name = "Max Distance",
-    Range = {0, 5000},
+    Name = "Max ESP Distance",
+    Range = {100, 5000},
     Increment = 50,
     Suffix = "studs",
     CurrentValue = itemMaxDistance,
     Callback = function(v) itemMaxDistance = v end
 })
 
--- Bypasses Tab
-BypassesTab:CreateParagraph({
-    Title = "Active Bypasses",
-    Content = "✓ Teleport Bypass (Prevents kick on teleport)\n✓ Item Magnitude Bypass (Bypasses distance checks)\n✓ Ghost Item Bypass (Picks up ghost items safely)\n✓ Stand Control (Optional - Godmode/Invisible)\n✓ SMOOTH 60FPS ESP (Item cache + no lag)"
-})
-
-BypassesTab:CreateToggle({
-    Name = "Stand Control (Experimental)",
-    CurrentValue = standControlEnabled,
-    Callback = function(v)
-        standControlEnabled = v
-        if v then
-            controlStand(true)
-            safeNotify("Stand Control", "Enabled! You are now controlling your stand.", 3)
-        else
-            controlStand(false)
-            safeNotify("Stand Control", "Disabled!", 2)
-        end
-    end
-})
-
-BypassesTab:CreateButton({
-    Name = "Force Teleport Bypass Check",
-    Callback = function()
-        safeNotify("Bypasses", "Teleport bypass is active!", 2)
-    end
-})
-
--- Settings Tab
-SettingsTab:CreateDropdown({
-    Name = "UI Theme",
-    Options = themes,
-    CurrentOption = "Default",
-    Callback = function(theme)
-        pcall(function() Window.ModifyTheme(theme) end)
-        safeNotify("Theme", "Changed to: " .. theme, 2)
-    end
-})
-
-SettingsTab:CreateInput({
-    Name = "Config Name",
-    PlaceholderText = "default",
-    RemoveTextAfterFocusLost = false,
-    Callback = function(text)
-        if text and text ~= "" then
-            currentConfig = text
-        end
-    end
-})
-
-SettingsTab:CreateButton({
-    Name = "Save Config",
-    Callback = function()
-        saveConfig(currentConfig)
-    end
-})
-
-SettingsTab:CreateButton({
-    Name = "Load Config",
-    Callback = function()
-        loadConfig(currentConfig)
-    end
-})
-
-local configs = listConfigs()
-if #configs > 0 then
-    SettingsTab:CreateDropdown({
-        Name = "Load Saved Config",
-        Options = configs,
-        CurrentOption = configs[1],
-        Callback = function(name)
-            loadConfig(name)
-            currentConfig = name
-        end
-    })
-end
-
-SettingsTab:CreateButton({
-    Name = "Refresh Config List",
-    Callback = function()
-        local newConfigs = listConfigs()
-        safeNotify("Config", "Found " .. #newConfigs .. " configs", 2)
-    end
-})
-
-SettingsTab:CreateButton({
-    Name = "Delete Current Config",
-    Callback = function()
-        deleteConfig(currentConfig)
-    end
+ItemsTab:CreateParagraph({
+    Title = "📦 Item Info",
+    Content = "no?"
 })
 
 -- Info Tab
 InfoTab:CreateParagraph({
-    Title = "Simforea Hub (SMOOTH 60FPS)",
-    Content = string.format("Game: %s\nPlace ID: %d\n\nCurrent Mode: %s\nFlight Speed: %d\n\n=== OPTIMIZATIONS ===\n✓ Item cache (GetDescendants ONCE)\n✓ 60 FPS Item ESP (no lag!)\n✓ Pre-created Drawing objects\n✓ No text recreation each frame\n✓ Stable prompt positions\n\n=== FEATURES ===\n✓ Perfect targeting (center of item)\n✓ Dynamic speed system\n✓ BodyVelocity through walls\n✓ Proper InputHold pickup\n✓ Multiple configs\n✓ Theme support\n\n=== ANTI-CHEAT BYPASSES ===\n✓ Teleport Bypass\n✓ Item Magnitude Bypass\n✓ Ghost Item Bypass\n✓ Stand Control (Godmode)\n\nRecommended speed: 100-120 for YBA\n\nConfigs saved to: %s", gameName, currentPlaceId, teleportMethod, flightSpeed, CONFIG_FOLDER)
+    Title = "Simforea Hub",
+    Content = string.format("cry about it", gameName, currentPlaceId, flightSpeed)
 })
 
--- ==================== ЗАПУСК (ПЛАВНЫЙ 60 FPS) ====================
-originalGravity = Workspace.Gravity
+-- ==================== ЗАПУСК ====================
+updateItemCache()
 
--- ВСЁ обновляется на RenderStepped для максимальной плавности
+-- Обновление ESP каждый кадр
 RunService.RenderStepped:Connect(function()
-    pcall(updatePlayerESP)
-    pcall(updateItemESP)    -- Теперь 60 FPS и без лагов!
+    pcall(updateItemESP)
     pcall(updateSpeedhack)
     pcall(updateInfiniteJump)
 end)
 
-Players.LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    clearAllESP()
-    setupMagnitudeBypass()
-    if noclipEnabled then
-        startNoclip()
+-- Обновляем кеш в фоне
+task.spawn(function()
+    while true do
+        task.wait(CACHE_UPDATE_INTERVAL)
+        if not autoFarmEnabled then
+            updateItemCache()
+        end
     end
 end)
 
-game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
-    clearAllESP()
-    clearAllChams()
-    clearAllItemESP()
-    processedItems = {}
-    if autoFarmEnabled then stopAutoFarm() end
+-- Следим за новыми предметами
+local function watchForNewItems()
+    local itemSpawns = workspace:FindFirstChild("Item_Spawns")
+    if itemSpawns then
+        local itemsFolder = itemSpawns:FindFirstChild("Items")
+        if itemsFolder then
+            itemsFolder.ChildAdded:Connect(function(newItem)
+                if newItem:IsA("Model") then
+                    updateItemCache()
+                end
+            end)
+            
+            itemsFolder.ChildRemoved:Connect(function(removedItem)
+                if itemEspObjects[removedItem] then
+                    removeItemESP(removedItem)
+                end
+            end)
+        end
+    end
+end
+
+task.spawn(watchForNewItems)
+
+-- Переподключение байпасов при смене персонажа
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    setupMagnitudeBypass()
     if noclipEnabled then
-        task.wait(1)
         startNoclip()
     end
 end)
@@ -1665,24 +941,4 @@ if noclipEnabled then
     startNoclip()
 end
 
-local function autoLoadLastConfig()
-    local configs = listConfigs()
-    if #configs > 0 then
-        if isfile(CONFIG_FOLDER .. "/default.json") then
-            loadConfig("default")
-            currentConfig = "default"
-        else
-            loadConfig(configs[1])
-            currentConfig = configs[1]
-        end
-    end
-end
-
-pcall(autoLoadLastConfig)
-
-safeNotify("Simforea Hub", "SMOOTH 60FPS Edition - ESP is buttery smooth!", 5)
-
-print("[Simforea Hub] SMOOTH 60FPS version loaded!")
-print("[Simforea Hub] Item cache active - ESP updates at 60 FPS without lag!")
-print("[Simforea Hub] Drawing objects created once - no recreation per frame!")
-print("[Simforea Hub] Active bypasses: Teleport, Magnitude, Ghost Item, Stand Control")
+safeNotify("Simforea Hub", 3)
