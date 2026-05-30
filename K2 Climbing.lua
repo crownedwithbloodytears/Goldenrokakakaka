@@ -27,10 +27,10 @@ local DEFAULT_NOCLIP_ENABLED = false
 local DEFAULT_ANTI_FALL_DAMAGE_ENABLED = false
 
 local DEFAULT_SPEED = 200
-local DEFAULT_INFINITE_JUMP_BOOST = 50
+local DEFAULT_INFINITE_JUMP_BOOST = 150
 
 local MIN_SPEED = 50
-local MAX_SPEED = 500
+local MAX_SPEED = 750
 
 -- ==================== GLOBAL VARIABLES ====================
 local speedhackEnabled = DEFAULT_SPEEDHACK_ENABLED
@@ -42,7 +42,7 @@ local currentSpeed = DEFAULT_SPEED
 local currentInfiniteJumpBoost = DEFAULT_INFINITE_JUMP_BOOST
 
 -- Player ESP settings
-local playerEspEnabled = true
+local playerEspEnabled = false
 local playerNameEnabled = true
 local playerDistanceEnabled = true
 local playerBoxEnabled = true
@@ -431,14 +431,14 @@ print("[Universal Hub] Loading Rayfield...")
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Simforea Universal",
+    Name = "Simforea Hub",
     Icon = 0,
-    LoadingTitle = "Universal",
-    LoadingSubtitle = "cry",
+    LoadingTitle = "K2 Climbing",
+    LoadingSubtitle = "there's no ac?",
     Theme = "Default",
     ConfigurationSaving = {
         Enabled = true,
-        FolderName = "UniversalHub",
+        FolderName = "SimforeaHub",
         FileName = "Settings"
     },
     KeySystem = false
@@ -569,7 +569,7 @@ ESPTab:CreateSlider({
 -- ==================== INFO TAB ====================
 InfoTab:CreateParagraph({
     Title = "Universal Hub",
-    Content = "Features:\n\n🔹 MOVEMENT:\n• Speedhack (50-500 studs/s)\n• Infinite Jump\n• NoClip (walk through walls)\n• Anti Fall Damage (no fall damage)\n\n🔹 PLAYER ESP:\n• Player name\n• Distance\n• Health percentage\n• 2D Box\n• Customizable colors\n\nWorks on ANY Roblox game!"
+    Content = "nothing special here"
 })
 
 -- ==================== MAIN LOOP ====================
