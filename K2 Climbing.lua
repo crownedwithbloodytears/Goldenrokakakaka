@@ -7,6 +7,63 @@ local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+-- ==================== ПРОВЕРКА ПЛЕЙСА ====================
+-- Укажите здесь ID игр, в которых разрешен запуск скрипта
+local ALLOWED_PLACE_IDS = {
+    [124853293317687] = "K2 Climbing",      --K2 Climbing SIMULATION
+}
+
+local currentPlaceId = game.PlaceId
+local gameName = ALLOWED_PLACE_IDS[currentPlaceId] or "Unknown Game"
+
+-- Проверка: разрешен ли текущий плейс?
+if not ALLOWED_PLACE_IDS[currentPlaceId] then
+    -- Если игра не разрешена, показываем предупреждение в консоль
+    print("=" .. string.rep("=", 60))
+    print("⚠️ SIMFOREA HUB - PLACE ID ERROR ⚠️")
+    print("=" .. string.rep("=", 60))
+    print("Current Place ID: " .. currentPlaceId)
+    print("Game Name: " .. gameName)
+    print("")
+    print("This script only works in the following games:")
+    for placeId, name in pairs(ALLOWED_PLACE_IDS) do
+        print("  • " .. name .. " (ID: " .. placeId .. ")")
+    end
+    print("")
+    print("Script execution stopped.")
+    print("=" .. string.rep("=", 60))
+    
+    -- Пытаемся показать уведомление через Rayfield (без задержки)
+    local success, rayfield = pcall(function()
+        return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    end)
+    
+    if success and rayfield then
+        -- Создаем временное окно без задержек
+        local tempWindow = rayfield:CreateWindow({
+            Name = "Simforea Hub - Error",
+            Icon = 0,
+            LoadingTitle = "Place ID Error",
+            LoadingSubtitle = "Script stopped",
+            Theme = "Default",
+            KeySystem = false
+        })
+        local tempTab = tempWindow:CreateTab("Error", 0)
+        tempTab:CreateParagraph({
+            Title = "⚠️ WRONG GAME ⚠️",
+            Content = "Current Place ID: " .. currentPlaceId .. "\nGame Name: " .. gameName .. 
+                      "\n\nThis script only works in allowed games.\n\nPleaseCheckAllowedGames."
+        })
+        -- Не ждем и не удаляем окно, оставляем пользователю закрыть его самому
+    end
+    
+    -- Останавливаем выполнение скрипта
+    return
+end
+
+-- Успешный запуск! Показываем информацию о текущей игре
+print("[Simforea Hub] Script loaded successfully in: " .. gameName .. " (Place ID: " .. currentPlaceId .. ")")
+
 local Camera = workspace.CurrentCamera or workspace:WaitForChild("CurrentCamera")
 
 local hasDrawing = pcall(Drawing.new, "Text")
@@ -48,7 +105,7 @@ local DEFAULT_SPEED = 200
 local DEFAULT_INFINITE_JUMP_BOOST = 50
 
 local MIN_SPEED = 50
-local MAX_SPEED = 500
+local MAX_SPEED = 10000
 
 -- ==================== GLOBAL VARIABLES ====================
 local speedhackEnabled = DEFAULT_SPEEDHACK_ENABLED
@@ -64,7 +121,7 @@ local antiOxygenEnabled = DEFAULT_ANTI_OXYGEN_ENABLED
 local antiRagdollEnabled = DEFAULT_ANTI_RAGDOLL_ENABLED
 
 -- Player ESP settings
-local playerEspEnabled = true
+local playerEspEnabled = false
 local playerNameEnabled = true
 local playerDistanceEnabled = true
 local playerBoxEnabled = true
