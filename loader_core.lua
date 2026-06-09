@@ -1,236 +1,52 @@
--- ========== MOG PANEL CORE WITH DISCORD LOGS ==========
-local plr = game.Players.LocalPlayer or game:GetService("Players").LocalPlayer
+-- ========== ПОЛУЧАЕМ КЛЮЧ ИЗ URL ==========
+local script_key = ...
 
--- ========== НАСТРОЙКИ ==========
-local webhookURL = "https://discord.com/api/webhooks/1513876561252585503/TNaiMTX6eST5jthR6_ATaahPvX-R-X1Yu_FiE0H6yUVR4GCpspPZabPeDjez5TzvFLrP"  -- ВАШ ВЕБХУК
-
--- ========== ВАЛИДНЫЕ КЛЮЧИ И ИХ ВЛАДЕЛЬЦЫ ==========
--- Формат: {ключ}
+-- ========== ВАЛИДНЫЕ КЛЮЧИ ==========
 local validKeys = {
-    {"MOG7X-9K2P4-1L8N5-3V6M2", "", "User1", "@user1"},
-    {"ROK4A-7C3E9-2W5Q8-6B1T7", "", "User2", "@user2"},
-    {"PAN3D-5F8H1-9J4L7-2K6N9", "", "User3", "@user3"},
-    {"KEYS8-4M2V6-1X9C3-7B5R0", "", "User4", "@user4"},
-    {"CODE2-6Q4W8-3Z7L1-9F5H4", "", "User5", "@user5"},
+    "MOG7X-9K2P4-1L8N5-3V6M2",
+    "ROK4A-7C3E9-2W5Q8-6B1T7",
+    "PAN3D-5F8H1-9J4L7-2K6N9",
+    "KEYS8-4M2V6-1X9C3-7B5R0",
+    "CODE2-6Q4W8-3Z7L1-9F5H4"
 }
-
--- ========== ПОЛУЧЕНИЕ HWID ==========
-local function getHWID()
-    local hwid = ""
-    pcall(function()
-        if syn and syn.getHWID then
-            hwid = syn.getHWID()
-        elseif getexecutorname then
-            hwid = getexecutorname() .. "-" .. game:GetService("RbxAnalyticsService"):GetClientId()
-        else
-            hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-        end
-    end)
-    if hwid == "" then
-        hwid = "Unknown-" .. game:GetService("RbxAnalyticsService"):GetClientId()
-    end
-    return hwid
-end
-
--- ========== ПОЛУЧЕНИЕ IP АДРЕСА ==========
-local function getIP()
-    local ip = "Unknown"
-    pcall(function()
-        local request = syn and syn.request or http and http.request or request
-        if request then
-            local response = request({
-                Url = "https://api.ipify.org",
-                Method = "GET"
-            })
-            if response and response.Body then
-                ip = response.Body
-            end
-        end
-    end)
-    
-    if ip == "Unknown" then
-        pcall(function()
-            local request = syn and syn.request or http and http.request or request
-            if request then
-                local response = request({
-                    Url = "https://icanhazip.com",
-                    Method = "GET"
-                })
-                if response and response.Body then
-                    ip = string.gsub(response.Body, "%s+", "")
-                end
-            end
-        end)
-    end
-    return ip
-end
-
--- ========== ОТПРАВКА В DISCORD ==========
-local function sendToDiscord(title, color, fields)
-    local embed = {
-        title = title,
-        color = color,
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        fields = fields,
-        footer = {text = "Mog Panel Security System"}
-    }
-    
-    local data = {
-        username = "Mog Panel Security",
-        avatar_url = "https://i.imgur.com/4M2iC5c.png",
-        embeds = {embed}
-    }
-    
-    local encodedData = game:GetService("HttpService"):JSONEncode(data)
-    
-    pcall(function()
-        local request = syn and syn.request or http and http.request or request
-        if request then
-            request({
-                Url = webhookURL,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = encodedData
-            })
-        end
-    end)
-end
-
--- ========== ИЗВЛЕКАЕМ КЛЮЧ ИЗ АРГУМЕНТОВ ==========
-local args = {...}
-local userKey = args[1] or ""
-
--- ========== ПОЛУЧАЕМ ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ==========
-local userHWID = getHWID()
-local userIP = getIP()
-local userProfileLink = "https://www.roblox.com/users/" .. plr.UserId .. "/profile"
 
 -- ========== ПРОВЕРКА КЛЮЧА ==========
-local keyData = nil
-local keyOwner = nil
-local keyDiscord = nil
-
-for _, data in ipairs(validKeys) do
-    if data[1] == userKey then
-        keyData = data
-        keyOwner = data[3]
-        keyDiscord = data[4]
-        break
+local function checkKey(k)
+    for _, v in ipairs(validKeys) do
+        if v == k then
+            return true
+        end
     end
+    return false
 end
 
--- ========== ЛОГИРУЕМ ПОПЫТКУ АКТИВАЦИИ ==========
-local attemptFields = {
-    {name = "👤 Roblox User", value = "**Username:** " .. plr.Name .. "\n**Display:** " .. plr.DisplayName .. "\n**User ID:** " .. plr.UserId .. "\n**Profile:** [Click Here](" .. userProfileLink .. ")", inline = false},
-    {name = "🔑 Key Used", value = "```" .. userKey .. "```", inline = false},
-    {name = "🖥️ HWID", value = "```" .. userHWID .. "```", inline = false},
-    {name = "🌐 IP Address", value = "```" .. userIP .. "```", inline = false},
-    {name = "📅 Time", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false},
-}
-
--- ========== ПРОВЕРКА НА ПРИВЯЗКУ ==========
-local isFirstTime = false
-local ipMismatch = false
-
-if keyData then
-    local boundIP = keyData[2]
-    
-    if boundIP == "" then
-        -- Первая активация - привязываем IP
-        keyData[2] = userIP
-        isFirstTime = true
-        sendToDiscord("🔐 FIRST ACTIVATION - " .. plr.Name, 0xFFA500, attemptFields)
-    elseif boundIP == userIP then
-        -- Тот же пользователь
-        sendToDiscord("✅ KEY ACTIVATED - " .. plr.Name, 0x00FF00, attemptFields)
-    else
-        -- Другой IP! Кто-то пытается использовать чужой ключ
-        ipMismatch = true
-        local mismatchFields = {
-            {name = "⚠️ SECURITY ALERT", value = "Someone is trying to use a key from a different IP!", inline = false},
-            {name = "👤 Roblox User", value = "**Username:** " .. plr.Name .. "\n**User ID:** " .. plr.UserId .. "\n**Profile:** [Click Here](" .. userProfileLink .. ")", inline = false},
-            {name = "🔑 Key", value = "```" .. userKey .. "```", inline = false},
-            {name = "🔒 Key Owner", value = "**Owner:** " .. keyOwner .. "\n**Discord:** " .. keyDiscord, inline = false},
-            {name = "🌐 Current IP", value = "```" .. userIP .. "```", inline = false},
-            {name = "🔐 Bound IP", value = "```" .. boundIP .. "```", inline = false},
-            {name = "🖥️ HWID", value = "```" .. userHWID .. "```", inline = false},
-        }
-        sendToDiscord("🚨 SECURITY ALERT - IP MISMATCH", 0xFF0000, mismatchFields)
-    end
-else
-    -- Неверный ключ
-    sendToDiscord("❌ INVALID KEY ATTEMPT - " .. plr.Name, 0xFF0000, attemptFields)
-end
-
--- ========== ЕСЛИ ПРОВЕРКА НЕ ПРОЙДЕНА ==========
-if not keyData or ipMismatch then
-    local errorGui = Instance.new("ScreenGui")
-    errorGui.Name = "Error"
-    errorGui.Parent = plr.PlayerGui
+if not checkKey(script_key) then
+    local plr = game.Players.LocalPlayer
+    local gui = Instance.new("ScreenGui")
+    gui.Parent = plr.PlayerGui
     
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 400, 0, 200)
-    frame.Position = UDim2.new(0.5, -200, 0.5, -100)
-    frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    frame.BorderSizePixel = 0
-    frame.Parent = errorGui
+    frame.Size = UDim2.new(0, 300, 0, 100)
+    frame.Position = UDim2.new(0.5, -150, 0.5, -50)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    frame.Parent = gui
     
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = frame
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.Text = "INVALID KEY\nAccess Denied"
+    text.TextColor3 = Color3.fromRGB(255, 50, 50)
+    text.TextSize = 16
+    text.Font = Enum.Font.GothamBold
+    text.Parent = frame
     
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 50)
-    title.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    title.Text = ipMismatch and "KEY ALREADY IN USE" or "INVALID KEY"
-    title.TextColor3 = Color3.fromRGB(255, 60, 60)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 16
-    title.Parent = frame
-    
-    local msg = Instance.new("TextLabel")
-    msg.Size = UDim2.new(1, -20, 0, 60)
-    msg.Position = UDim2.new(0, 10, 0, 60)
-    msg.BackgroundTransparency = 1
-    if ipMismatch then
-        msg.Text = "This key is already activated on another device.\n\nIf this is a mistake, contact support with your HWID:\n" .. userHWID
-    else
-        msg.Text = "The license key you entered is invalid.\n\nPlease check your key and try again."
-    end
-    msg.TextColor3 = Color3.fromRGB(180, 180, 180)
-    msg.TextSize = 12
-    msg.Font = Enum.Font.Gotham
-    msg.TextWrapped = true
-    msg.Parent = frame
-    
-    local hwidLabel = Instance.new("TextLabel")
-    hwidLabel.Size = UDim2.new(1, -20, 0, 30)
-    hwidLabel.Position = UDim2.new(0, 10, 0, 130)
-    hwidLabel.BackgroundTransparency = 1
-    hwidLabel.Text = "HWID: " .. userHWID
-    hwidLabel.TextColor3 = Color3.fromRGB(100, 100, 120)
-    hwidLabel.TextSize = 10
-    hwidLabel.Font = Enum.Font.Gotham
-    hwidLabel.Parent = frame
-    
-    wait(5)
-    errorGui:Destroy()
+    wait(2)
+    gui:Destroy()
     return
 end
 
--- ========== ПРИВЕТСТВИЕ ==========
-local welcomeFields = {
-    {name = "👤 Roblox User", value = "**Username:** " .. plr.Name .. "\n**Display:** " .. plr.DisplayName .. "\n**User ID:** " .. plr.UserId .. "\n**Profile:** [Click Here](" .. userProfileLink .. ")", inline = false},
-    {name = "🔑 Key Owner", value = "**Owner:** " .. keyOwner .. "\n**Discord:** " .. keyDiscord, inline = false},
-    {name = "🖥️ HWID", value = "```" .. userHWID .. "```", inline = false},
-    {name = "🌐 IP Address", value = "```" .. userIP .. "```", inline = false},
-}
-
-if isFirstTime then
-    welcomeFields[#welcomeFields + 1] = {name = "🔒 Key Bound", value = "This key is now locked to your IP/HWID", inline = false}
-end
-
-sendToDiscord("🟢 MOG PANEL ACTIVATED - " .. plr.Name, 0x00FF00, welcomeFields)
+-- ========== ЕСЛИ КЛЮЧ ВЕРНЫЙ ==========
+local plr = game.Players.LocalPlayer
+print("✅ Key accepted! Loading Mog Panel...")
 
 -- ========== ЭКРАН ЗАГРУЗКИ ==========
 local splashGui = Instance.new("ScreenGui")
