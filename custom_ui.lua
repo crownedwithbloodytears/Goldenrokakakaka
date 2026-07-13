@@ -675,9 +675,9 @@ function Section:AddSlider(text, min, max, default, unit, callback)
     local ValueLabel = Instance.new("TextLabel")
     ValueLabel.BackgroundTransparency = 1
     ValueLabel.Size = UDim2.fromScale(1, 1)
-    ValueLabel.Font = Enum.Font.Gotham
+    ValueLabel.Font = Enum.Font.GothamBold
     ValueLabel.TextSize = 12
-    ValueLabel.TextColor3 = Theme.Text
+    ValueLabel.TextColor3 = Color3.fromRGB(20, 20, 20) -- Чёрный текст
     ValueLabel.Text = tostring(default) .. unit .. "/" .. tostring(max) .. unit
     ValueLabel.ZIndex = 2
     ValueLabel.Parent = Bar
@@ -686,8 +686,20 @@ function Section:AddSlider(text, min, max, default, unit, callback)
     local function update(inputPos)
         local rel = math.clamp((inputPos.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
         local value = math.floor(min + (max - min) * rel + 0.5)
-        tween(Fill, TweenInfo.new(0.05), {Size = UDim2.fromScale(rel, 1)})
+        
+        tween(Fill, TweenInfo.new(0.05), {
+            Size = UDim2.fromScale(rel, 1)
+        })
+        
         ValueLabel.Text = tostring(value) .. unit .. "/" .. tostring(max) .. unit
+        
+        -- Автоматическая смена цвета текста в зависимости от заполнения
+        if rel > 0.15 then
+            ValueLabel.TextColor3 = Color3.fromRGB(20, 20, 20) -- Чёрный на белом
+        else
+            ValueLabel.TextColor3 = Theme.Text -- Белый на тёмном
+        end
+        
         if callback then callback(value) end
     end
 
@@ -697,11 +709,13 @@ function Section:AddSlider(text, min, max, default, unit, callback)
             update(input.Position)
         end
     end)
+    
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
+    
     UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             update(input.Position)
@@ -721,6 +735,7 @@ function Section:AddDropdown(text, options, default, callback)
     Container.BackgroundTransparency = 1
     Container.LayoutOrder = self:_order()
     Container.Parent = self.Frame
+    Container.ClipsDescendants = false -- Важно, чтобы список не обрезался
 
     local Label = Instance.new("TextLabel")
     Label.BackgroundTransparency = 1
@@ -774,11 +789,28 @@ function Section:AddDropdown(text, options, default, callback)
     listLayout(List, 0)
 
     local open = false
+    local listHeight = #options * 22
+    
     local function close()
         open = false
-        tween(Arrow, TweenInfo.new(0.15), {Rotation = 0})
-        local t = tween(List, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 0)})
-        t.Completed:Connect(function() if not open then List.Visible = false end end)
+        
+        tween(Arrow, TweenInfo.new(0.15), {
+            Rotation = 0
+        })
+        
+        tween(Container, TweenInfo.new(0.15), {
+            Size = UDim2.new(1, 0, 0, 40)
+        })
+        
+        local t = tween(List, TweenInfo.new(0.15), {
+            Size = UDim2.new(1, 0, 0, 0)
+        })
+        
+        t.Completed:Connect(function()
+            if not open then
+                List.Visible = false
+            end
+        end)
     end
 
     local function selectOption(opt)
@@ -804,16 +836,32 @@ function Section:AddDropdown(text, options, default, callback)
 
     Head.MouseButton1Click:Connect(function()
         open = not open
+        
         if open then
             List.Visible = true
-            tween(Arrow, TweenInfo.new(0.15), {Rotation = 180})
-            tween(List, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, #options * 22)})
+            
+            tween(Arrow, TweenInfo.new(0.15), {
+                Rotation = 180
+            })
+            
+            tween(List, TweenInfo.new(0.15), {
+                Size = UDim2.new(1, 0, 0, listHeight)
+            })
+            
+            tween(Container, TweenInfo.new(0.15), {
+                Size = UDim2.new(1, 0, 0, 40 + listHeight)
+            })
         else
             close()
         end
     end)
 
-    return { Set = function(_, v) SelectedLabel.Text = tostring(v) end }
+    return { 
+        Set = function(_, v) 
+            SelectedLabel.Text = tostring(v) 
+        end,
+        Close = close -- Добавляем возможность закрыть дропдаун программно
+    }
 end
 
 -- ---- Button ----
