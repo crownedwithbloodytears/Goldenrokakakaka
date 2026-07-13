@@ -1,18 +1,3 @@
---[[
-    CustomLib_TopTabs (v2)
-    Изменения по фидбеку:
-      - ИСПРАВЛЕН баг с порядком элементов в секциях (заголовок уезжал вниз) —
-        причина: у UIListLayout не был явно проставлен SortOrder = LayoutOrder,
-        из-за чего Roblox сортировал детей по имени инстанса (Frame/TextButton/TextLabel),
-        а не по порядку добавления. Теперь SortOrder указан явно везде.
-      - Полоска активной вкладки теперь ДЕЙСТВИТЕЛЬНО следит за позицией кнопки
-        (подписана на AbsolutePosition/AbsoluteSize), поэтому больше не "уезжает",
-        когда рядом появляются другие вкладки.
-      - Чёрно-белая (монохромная) тема вместо зелёной.
-      - Добавлены настройки самого меню: полная выгрузка (Destroy), смена
-        клавиши открытия/закрытия, масштаб интерфейса, сброс позиции окна.
-]]
-
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players          = game:GetService("Players")
@@ -217,13 +202,6 @@ function Library:CreateWindow(config)
     local mainTabList = listLayout(MainTabBar, 28, true)
     mainTabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-    local Underline = Instance.new("Frame")
-    Underline.BackgroundColor3 = Theme.Accent
-    Underline.BorderSizePixel = 0
-    Underline.Size = UDim2.fromOffset(0, 2)
-    Underline.Position = UDim2.new(0, 0, 1, -2)
-    Underline.Parent = MainTabBar
-
     -- ---- Контейнер контента ----
     local ContentHost = Instance.new("Frame")
     ContentHost.Position = UDim2.new(0, 0, 0, 76)
@@ -237,7 +215,6 @@ function Library:CreateWindow(config)
         Main = Main,
         UIScale = UIScale,
         MainTabBar = MainTabBar,
-        Underline = Underline,
         ContentHost = ContentHost,
         MainTabs = {},
         CurrentMainTab = nil,
@@ -325,13 +302,6 @@ function Window:Destroy()
 end
 
 -- ====================== ГЛАВНЫЕ ВКЛАДКИ ======================
-local function updateUnderline(window, tab)
-    tween(window.Underline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0, tab.Button.AbsolutePosition.X - window.MainTabBar.AbsolutePosition.X, 1, -2),
-        Size = UDim2.fromOffset(tab.Button.AbsoluteSize.X, 2),
-    })
-end
-
 function Window:AddMainTab(name)
     local Btn = Instance.new("TextButton")
     Btn.BackgroundTransparency = 1
@@ -342,6 +312,19 @@ function Window:AddMainTab(name)
     Btn.TextColor3 = Theme.SubText
     Btn.Text = name
     Btn.Parent = self.MainTabBar
+
+    -- Полоска-индикатор — РЕБЁНОК самой кнопки. Она физически не может
+    -- оказаться "не под своей вкладкой", потому что её размер и позиция
+    -- заданы в масштабе (Scale) относительно родителя, а не в абсолютных
+    -- пикселях экрана — никакой зависимости от таймингов пересчёта layout.
+    local UnderlineBar = Instance.new("Frame")
+    UnderlineBar.AnchorPoint = Vector2.new(0.5, 0)
+    UnderlineBar.Position = UDim2.new(0.5, 0, 1, 6)
+    UnderlineBar.Size = UDim2.new(0, 0, 0, 2)
+    UnderlineBar.BackgroundColor3 = Theme.Accent
+    UnderlineBar.BackgroundTransparency = 1
+    UnderlineBar.BorderSizePixel = 0
+    UnderlineBar.Parent = Btn
 
     local Host = Instance.new("Frame")
     Host.Size = UDim2.fromScale(1, 1)
@@ -367,6 +350,7 @@ function Window:AddMainTab(name)
     local tabObj = setmetatable({
         Window = windowRef,
         Button = Btn,
+        Underline = UnderlineBar,
         Host = Host,
         SubTabBar = SubTabBar,
         SubContentHost = SubContentHost,
@@ -375,16 +359,6 @@ function Window:AddMainTab(name)
     }, MainTab)
 
     table.insert(self.MainTabs, tabObj)
-
-    -- Полоска-индикатор реагирует на реальное движение кнопки (когда рядом
-    -- добавляются другие вкладки и раскладка пересчитывается), а не только
-    -- на момент выбора вкладки.
-    track(self.Connections, Btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
-        if windowRef.CurrentMainTab == tabObj then updateUnderline(windowRef, tabObj) end
-    end))
-    track(self.Connections, Btn:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-        if windowRef.CurrentMainTab == tabObj then updateUnderline(windowRef, tabObj) end
-    end))
 
     track(self.Connections, Btn.MouseButton1Click:Connect(function()
         windowRef:SelectMainTab(tabObj)
@@ -415,11 +389,18 @@ function Window:SelectMainTab(tab)
     if old then
         tween(old.Button, TweenInfo.new(0.15), {TextColor3 = Theme.SubText})
         old.Host.Visible = false
+        tween(old.Underline, TweenInfo.new(0.15), {
+            Size = UDim2.new(0, 0, 0, 2),
+            BackgroundTransparency = 1,
+        })
     end
 
     tween(tab.Button, TweenInfo.new(0.15), {TextColor3 = Theme.Accent})
     tab.Host.Visible = true
-    updateUnderline(self, tab)
+    tween(tab.Underline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = UDim2.new(1, 0, 0, 2),
+        BackgroundTransparency = 0,
+    })
 end
 
 -- ====================== ПОД-ВКЛАДКИ ======================
