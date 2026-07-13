@@ -1,3 +1,18 @@
+--[[
+    CustomLib_TopTabs (v2)
+    Изменения по фидбеку:
+      - ИСПРАВЛЕН баг с порядком элементов в секциях (заголовок уезжал вниз) —
+        причина: у UIListLayout не был явно проставлен SortOrder = LayoutOrder,
+        из-за чего Roblox сортировал детей по имени инстанса (Frame/TextButton/TextLabel),
+        а не по порядку добавления. Теперь SortOrder указан явно везде.
+      - Полоска активной вкладки теперь ДЕЙСТВИТЕЛЬНО следит за позицией кнопки
+        (подписана на AbsolutePosition/AbsoluteSize), поэтому больше не "уезжает",
+        когда рядом появляются другие вкладки.
+      - Чёрно-белая (монохромная) тема вместо зелёной.
+      - Добавлены настройки самого меню: полная выгрузка (Destroy), смена
+        клавиши открытия/закрытия, масштаб интерфейса, сброс позиции окна.
+]]
+
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players          = game:GetService("Players")
@@ -6,17 +21,17 @@ local CoreGui          = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
--- ====================== ТЕМА ======================
+-- ====================== ТЕМА (чёрно-белая) ======================
 local Theme = {
-    Background = Color3.fromRGB(18, 18, 21),
-    TopBar     = Color3.fromRGB(24, 24, 28),
-    Section    = Color3.fromRGB(26, 26, 30),
-    Element    = Color3.fromRGB(33, 33, 38),
-    Accent     = Color3.fromRGB(80, 210, 120),   -- зелёный акцент, как на скрине
-    Text       = Color3.fromRGB(230, 230, 235),
-    SubText    = Color3.fromRGB(140, 140, 150),
-    Disabled   = Color3.fromRGB(90, 90, 95),
-    Stroke     = Color3.fromRGB(42, 42, 48),
+    Background = Color3.fromRGB(14, 14, 16),
+    TopBar     = Color3.fromRGB(19, 19, 22),
+    Section    = Color3.fromRGB(21, 21, 24),
+    Element    = Color3.fromRGB(31, 31, 35),
+    Accent     = Color3.fromRGB(255, 255, 255), -- белый акцент вместо зелёного
+    Text       = Color3.fromRGB(198, 198, 203),
+    SubText    = Color3.fromRGB(126, 126, 134),
+    Disabled   = Color3.fromRGB(78, 78, 84),
+    Stroke     = Color3.fromRGB(44, 44, 50),
     White      = Color3.fromRGB(255, 255, 255),
 }
 
@@ -52,6 +67,24 @@ local function padUniform(parent, all)
     return p
 end
 
+-- Всегда явно задаём SortOrder, иначе Roblox может сортировать детей
+-- по имени инстанса, а не по порядку добавления (это и было причиной бага).
+local function listLayout(parent, padding, horizontal)
+    local l = Instance.new("UIListLayout")
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.Padding = UDim.new(0, padding or 0)
+    if horizontal then
+        l.FillDirection = Enum.FillDirection.Horizontal
+    end
+    l.Parent = parent
+    return l
+end
+
+local function track(list, conn)
+    table.insert(list, conn)
+    return conn
+end
+
 -- ====================== МЕТАТАБЛИЦЫ КЛАССОВ ======================
 local Window   = {}; Window.__index = Window
 local MainTab  = {}; MainTab.__index = MainTab
@@ -66,7 +99,6 @@ function Library:CreateWindow(config)
     local title    = config.Title or "Menu"
     local subtitle = config.Subtitle or ""
     local size     = config.Size or UDim2.fromOffset(700, 520)
-    local toggleKey = config.ToggleKey or Enum.KeyCode.RightControl
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "CustomLibTopTabsGui"
@@ -90,7 +122,11 @@ function Library:CreateWindow(config)
     corner(Main, 10)
     stroke(Main, Theme.Stroke, 1)
 
-    -- ---- Верхняя шапка (Title • Subtitle ... [x]) ----
+    local UIScale = Instance.new("UIScale")
+    UIScale.Scale = 1
+    UIScale.Parent = Main
+
+    -- ---- Верхняя шапка ----
     local TopBar = Instance.new("Frame")
     TopBar.Size = UDim2.new(1, 0, 0, 36)
     TopBar.BackgroundColor3 = Theme.TopBar
@@ -117,8 +153,7 @@ function Library:CreateWindow(config)
 
     local SubtitleLabel = Instance.new("TextLabel")
     SubtitleLabel.BackgroundTransparency = 1
-    SubtitleLabel.Position = UDim2.new(0, 14 + 6, 0, 0)
-    SubtitleLabel.AnchorPoint = Vector2.new(0, 0)
+    SubtitleLabel.Position = UDim2.new(0, 14, 0, 0)
     SubtitleLabel.Size = UDim2.new(0, 260, 1, 0)
     SubtitleLabel.Font = Enum.Font.Gotham
     SubtitleLabel.TextSize = 13
@@ -126,9 +161,8 @@ function Library:CreateWindow(config)
     SubtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     SubtitleLabel.Text = subtitle
     SubtitleLabel.Parent = TopBar
-    -- сдвигаем сабтайтл правее заголовка динамически
     task.defer(function()
-        SubtitleLabel.Position = UDim2.new(0, TitleLabel.TextBounds.X + 26, 0, 0)
+        SubtitleLabel.Position = UDim2.new(0, 14 + TitleLabel.TextBounds.X + 12, 0, 0)
     end)
 
     local CloseBtn = Instance.new("TextButton")
@@ -141,17 +175,20 @@ function Library:CreateWindow(config)
     CloseBtn.Size = UDim2.fromOffset(30, 30)
     CloseBtn.Position = UDim2.new(1, -36, 0, 3)
     CloseBtn.Parent = TopBar
-    CloseBtn.MouseEnter:Connect(function()
-        tween(CloseBtn, TweenInfo.new(0.15), {TextColor3 = Color3.fromRGB(255, 90, 90)})
-    end)
-    CloseBtn.MouseLeave:Connect(function()
+
+    local connections = {}
+
+    track(connections, CloseBtn.MouseEnter:Connect(function()
+        tween(CloseBtn, TweenInfo.new(0.15), {TextColor3 = Color3.fromRGB(230, 90, 90)})
+    end))
+    track(connections, CloseBtn.MouseLeave:Connect(function()
         tween(CloseBtn, TweenInfo.new(0.15), {TextColor3 = Theme.SubText})
-    end)
+    end))
 
     -- Перетаскивание за шапку
     do
         local dragging, dragStart, startPos
-        TopBar.InputBegan:Connect(function(input)
+        track(connections, TopBar.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                 dragging = true
                 dragStart = input.Position
@@ -160,13 +197,13 @@ function Library:CreateWindow(config)
                     if input.UserInputState == Enum.UserInputState.End then dragging = false end
                 end)
             end
-        end)
-        UserInputService.InputChanged:Connect(function(input)
+        end))
+        track(connections, UserInputService.InputChanged:Connect(function(input)
             if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                 local delta = input.Position - dragStart
                 Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
             end
-        end)
+        end))
     end
 
     -- ---- Ряд главных вкладок ----
@@ -177,12 +214,8 @@ function Library:CreateWindow(config)
     MainTabBar.BorderSizePixel = 0
     MainTabBar.Parent = Main
 
-    local MainTabList = Instance.new("UIListLayout")
-    MainTabList.FillDirection = Enum.FillDirection.Horizontal
-    MainTabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    MainTabList.Padding = UDim.new(0, 28)
-    MainTabList.SortOrder = Enum.SortOrder.LayoutOrder
-    MainTabList.Parent = MainTabBar
+    local mainTabList = listLayout(MainTabBar, 28, true)
+    mainTabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
     local Underline = Instance.new("Frame")
     Underline.BackgroundColor3 = Theme.Accent
@@ -191,7 +224,7 @@ function Library:CreateWindow(config)
     Underline.Position = UDim2.new(0, 0, 1, -2)
     Underline.Parent = MainTabBar
 
-    -- ---- Контейнер контента (под главными вкладками) ----
+    -- ---- Контейнер контента ----
     local ContentHost = Instance.new("Frame")
     ContentHost.Position = UDim2.new(0, 0, 0, 76)
     ContentHost.Size = UDim2.new(1, 0, 1, -76)
@@ -202,6 +235,7 @@ function Library:CreateWindow(config)
     local self = setmetatable({
         ScreenGui = ScreenGui,
         Main = Main,
+        UIScale = UIScale,
         MainTabBar = MainTabBar,
         Underline = Underline,
         ContentHost = ContentHost,
@@ -209,7 +243,15 @@ function Library:CreateWindow(config)
         CurrentMainTab = nil,
         Visible = true,
         OriginalSize = size,
+        Connections = connections,
+        ToggleKey = config.ToggleKey or Enum.KeyCode.RightControl,
     }, Window)
+
+    CloseBtn.MouseButton1Click:Connect(function() self:SetVisible(false) end)
+    track(self.Connections, UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == self.ToggleKey then self:SetVisible(not self.Visible) end
+    end))
 
     -- Анимация появления
     Main.Size = UDim2.new(size.X.Scale, size.X.Offset, size.Y.Scale, math.floor(size.Y.Offset * 0.85))
@@ -217,12 +259,6 @@ function Library:CreateWindow(config)
     tween(Main, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
         Size = size, BackgroundTransparency = 0,
     })
-
-    CloseBtn.MouseButton1Click:Connect(function() self:SetVisible(false) end)
-    UserInputService.InputBegan:Connect(function(input, gpe)
-        if gpe then return end
-        if input.KeyCode == toggleKey then self:SetVisible(not self.Visible) end
-    end)
 
     return self
 end
@@ -247,7 +283,55 @@ function Window:SetVisible(state)
     end
 end
 
+-- ---- Настройки самого меню ----
+function Window:SetToggleKey(keyCode)
+    self.ToggleKey = keyCode
+end
+
+-- Ждём следующее нажатие клавиши и передаём её в callback (для UI ребиндинга)
+function Window:CaptureNextKey(callback)
+    local conn
+    conn = UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            conn:Disconnect()
+            if callback then callback(input.KeyCode) end
+        end
+    end)
+    track(self.Connections, conn)
+end
+
+function Window:SetUIScale(percent)
+    tween(self.UIScale, TweenInfo.new(0.15), {Scale = percent / 100})
+end
+
+function Window:ResetPosition()
+    tween(self.Main, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Position = UDim2.fromScale(0.5, 0.5),
+    })
+end
+
+-- Полная выгрузка: отключает все коннекшены и уничтожает интерфейс
+function Window:Destroy()
+    for _, conn in ipairs(self.Connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    local t = tween(self.Main, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        BackgroundTransparency = 1,
+    })
+    t.Completed:Connect(function()
+        self.ScreenGui:Destroy()
+    end)
+end
+
 -- ====================== ГЛАВНЫЕ ВКЛАДКИ ======================
+local function updateUnderline(window, tab)
+    tween(window.Underline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0, tab.Button.AbsolutePosition.X - window.MainTabBar.AbsolutePosition.X, 1, -2),
+        Size = UDim2.fromOffset(tab.Button.AbsoluteSize.X, 2),
+    })
+end
+
 function Window:AddMainTab(name)
     local Btn = Instance.new("TextButton")
     Btn.BackgroundTransparency = 1
@@ -265,19 +349,13 @@ function Window:AddMainTab(name)
     Host.Visible = false
     Host.Parent = self.ContentHost
 
-    -- Ряд под-вкладок
     local SubTabBar = Instance.new("Frame")
     SubTabBar.Size = UDim2.new(1, -24, 0, 32)
     SubTabBar.Position = UDim2.new(0, 12, 0, 8)
     SubTabBar.BackgroundTransparency = 1
     SubTabBar.Parent = Host
+    listLayout(SubTabBar, 8, true)
 
-    local SubTabList = Instance.new("UIListLayout")
-    SubTabList.FillDirection = Enum.FillDirection.Horizontal
-    SubTabList.Padding = UDim.new(0, 8)
-    SubTabList.Parent = SubTabBar
-
-    -- Область под под-вкладками: два столбца
     local SubContentHost = Instance.new("Frame")
     SubContentHost.Position = UDim2.new(0, 12, 0, 48)
     SubContentHost.Size = UDim2.new(1, -24, 1, -56)
@@ -298,19 +376,29 @@ function Window:AddMainTab(name)
 
     table.insert(self.MainTabs, tabObj)
 
-    Btn.MouseButton1Click:Connect(function()
+    -- Полоска-индикатор реагирует на реальное движение кнопки (когда рядом
+    -- добавляются другие вкладки и раскладка пересчитывается), а не только
+    -- на момент выбора вкладки.
+    track(self.Connections, Btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+        if windowRef.CurrentMainTab == tabObj then updateUnderline(windowRef, tabObj) end
+    end))
+    track(self.Connections, Btn:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        if windowRef.CurrentMainTab == tabObj then updateUnderline(windowRef, tabObj) end
+    end))
+
+    track(self.Connections, Btn.MouseButton1Click:Connect(function()
         windowRef:SelectMainTab(tabObj)
-    end)
-    Btn.MouseEnter:Connect(function()
+    end))
+    track(self.Connections, Btn.MouseEnter:Connect(function()
         if windowRef.CurrentMainTab ~= tabObj then
             tween(Btn, TweenInfo.new(0.15), {TextColor3 = Theme.Text})
         end
-    end)
-    Btn.MouseLeave:Connect(function()
+    end))
+    track(self.Connections, Btn.MouseLeave:Connect(function()
         if windowRef.CurrentMainTab ~= tabObj then
             tween(Btn, TweenInfo.new(0.15), {TextColor3 = Theme.SubText})
         end
-    end)
+    end))
 
     if not self.CurrentMainTab then
         self:SelectMainTab(tabObj)
@@ -331,12 +419,7 @@ function Window:SelectMainTab(tab)
 
     tween(tab.Button, TweenInfo.new(0.15), {TextColor3 = Theme.Accent})
     tab.Host.Visible = true
-
-    -- Двигаем зелёную полоску-подчёркивание под активную вкладку
-    tween(self.Underline, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0, tab.Button.AbsolutePosition.X - self.MainTabBar.AbsolutePosition.X, 1, -2),
-        Size = UDim2.fromOffset(tab.Button.AbsoluteSize.X, 2),
-    })
+    updateUnderline(self, tab)
 end
 
 -- ====================== ПОД-ВКЛАДКИ ======================
@@ -369,9 +452,7 @@ function MainTab:AddSubTab(name)
     Left.CanvasSize = UDim2.new(0, 0, 0, 0)
     Left.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Left.Parent = Page
-    local LeftList = Instance.new("UIListLayout")
-    LeftList.Padding = UDim.new(0, 10)
-    LeftList.Parent = Left
+    listLayout(Left, 10)
 
     local Right = Instance.new("ScrollingFrame")
     Right.Size = UDim2.new(0.5, -6, 1, 0)
@@ -383,9 +464,7 @@ function MainTab:AddSubTab(name)
     Right.CanvasSize = UDim2.new(0, 0, 0, 0)
     Right.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Right.Parent = Page
-    local RightList = Instance.new("UIListLayout")
-    RightList.Padding = UDim.new(0, 10)
-    RightList.Parent = Right
+    listLayout(Right, 10)
 
     local mainTabRef = self
     local subTab = setmetatable({
@@ -398,19 +477,20 @@ function MainTab:AddSubTab(name)
 
     table.insert(self.SubTabs, subTab)
 
-    Btn.MouseButton1Click:Connect(function()
+    local conns = self.Window.Connections
+    track(conns, Btn.MouseButton1Click:Connect(function()
         mainTabRef:SelectSubTab(subTab)
-    end)
-    Btn.MouseEnter:Connect(function()
+    end))
+    track(conns, Btn.MouseEnter:Connect(function()
         if mainTabRef.CurrentSubTab ~= subTab then
             tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Stroke})
         end
-    end)
-    Btn.MouseLeave:Connect(function()
+    end))
+    track(conns, Btn.MouseLeave:Connect(function()
         if mainTabRef.CurrentSubTab ~= subTab then
             tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element})
         end
-    end)
+    end))
 
     if not self.CurrentSubTab then
         self:SelectSubTab(subTab)
@@ -426,12 +506,10 @@ function MainTab:SelectSubTab(subTab)
 
     if old then
         tween(old.Button, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element, TextColor3 = Theme.SubText})
-        local oldPage = old.Page
-        tween(oldPage, TweenInfo.new(0.15), {}) -- no-op placeholder for symmetry
-        oldPage.Visible = false
+        old.Page.Visible = false
     end
 
-    tween(subTab.Button, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Accent, TextColor3 = Theme.White})
+    tween(subTab.Button, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Accent, TextColor3 = Color3.fromRGB(20, 20, 20)})
     local page = subTab.Page
     page.Visible = true
     page.Position = UDim2.new(0, 16, 0, 0)
@@ -451,9 +529,7 @@ local function buildSection(parent, name)
     corner(Frame, 8)
     stroke(Frame, Theme.Stroke, 1)
 
-    local Layout = Instance.new("UIListLayout")
-    Layout.Padding = UDim.new(0, 6)
-    Layout.Parent = Frame
+    listLayout(Frame, 6)
     padUniform(Frame, 10)
 
     local Title = Instance.new("TextLabel")
@@ -506,7 +582,7 @@ function Section:AddToggle(text, default, callback)
     local Knob = Instance.new("Frame")
     Knob.Size = UDim2.fromOffset(12, 12)
     Knob.Position = default and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
-    Knob.BackgroundColor3 = Theme.White
+    Knob.BackgroundColor3 = default and Color3.fromRGB(20, 20, 20) or Theme.White
     Knob.Parent = Track
     corner(Knob, 6)
 
@@ -526,7 +602,8 @@ function Section:AddToggle(text, default, callback)
         state = v
         tween(Track, TweenInfo.new(0.15), {BackgroundColor3 = state and Theme.Accent or Theme.Element})
         tween(Knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-            Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+            Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6),
+            BackgroundColor3 = state and Color3.fromRGB(20, 20, 20) or Theme.White,
         })
         tween(Label, TweenInfo.new(0.15), {TextColor3 = state and Theme.Accent or Theme.Text})
         if fire ~= false and callback then callback(state) end
@@ -537,7 +614,7 @@ function Section:AddToggle(text, default, callback)
     return { Set = function(_, v) set(v, false) end, Get = function() return state end }
 end
 
--- ---- Placeholder (неактивный пункт "N/A", просто для вида) ----
+-- ---- Placeholder ----
 function Section:AddPlaceholder(text)
     local Row = Instance.new("Frame")
     Row.Size = UDim2.new(1, 0, 0, 26)
@@ -578,7 +655,7 @@ function Section:AddPlaceholder(text)
     return Row
 end
 
--- ---- Slider (с подписью диапазона, как на скрине) ----
+-- ---- Slider ----
 function Section:AddSlider(text, min, max, default, unit, callback)
     min = min or 0
     max = max or 100
@@ -653,7 +730,7 @@ function Section:AddSlider(text, min, max, default, unit, callback)
     return Container
 end
 
--- ---- Dropdown (раскрывается вниз с анимацией) ----
+-- ---- Dropdown ----
 function Section:AddDropdown(text, options, default, callback)
     options = options or {}
     default = default or options[1] or ""
@@ -661,7 +738,6 @@ function Section:AddDropdown(text, options, default, callback)
     local Container = Instance.new("Frame")
     Container.Size = UDim2.new(1, 0, 0, 40)
     Container.BackgroundTransparency = 1
-    Container.ClipsDescendants = false
     Container.LayoutOrder = self:_order()
     Container.Parent = self.Frame
 
@@ -714,8 +790,7 @@ function Section:AddDropdown(text, options, default, callback)
     List.ZIndex = 5
     List.Parent = Container
     corner(List, 5)
-    local ListLayout = Instance.new("UIListLayout")
-    ListLayout.Parent = List
+    listLayout(List, 0)
 
     local open = false
     local function close()
@@ -731,9 +806,10 @@ function Section:AddDropdown(text, options, default, callback)
         if callback then callback(opt) end
     end
 
-    for _, opt in ipairs(options) do
+    for i, opt in ipairs(options) do
         local OptBtn = Instance.new("TextButton")
         OptBtn.Size = UDim2.new(1, 0, 0, 22)
+        OptBtn.LayoutOrder = i
         OptBtn.BackgroundTransparency = 1
         OptBtn.Font = Enum.Font.Gotham
         OptBtn.TextSize = 12
@@ -773,8 +849,8 @@ function Section:AddButton(text, callback)
     Btn.Parent = self.Frame
     corner(Btn, 6)
 
-    Btn.MouseEnter:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Accent}) end)
-    Btn.MouseLeave:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element}) end)
+    Btn.MouseEnter:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Accent, TextColor3 = Color3.fromRGB(20,20,20)}) end)
+    Btn.MouseLeave:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element, TextColor3 = Theme.Text}) end)
     Btn.MouseButton1Click:Connect(function() if callback then callback() end end)
 
     return Btn
@@ -793,6 +869,48 @@ function Section:AddLabel(text)
     Label.LayoutOrder = self:_order()
     Label.Parent = self.Frame
     return Label
+end
+
+-- ---- Keybind-кнопка: клик -> "Press a key..." -> следующая нажатая клавиша ----
+function Section:AddKeybind(text, window, default, callback)
+    local Container = Instance.new("Frame")
+    Container.Size = UDim2.new(1, 0, 0, 26)
+    Container.BackgroundTransparency = 1
+    Container.LayoutOrder = self:_order()
+    Container.Parent = self.Frame
+
+    local Label = Instance.new("TextLabel")
+    Label.BackgroundTransparency = 1
+    Label.Size = UDim2.new(1, -80, 1, 0)
+    Label.Font = Enum.Font.Gotham
+    Label.TextSize = 14
+    Label.TextColor3 = Theme.Text
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Text = text
+    Label.Parent = Container
+
+    local KeyBtn = Instance.new("TextButton")
+    KeyBtn.Position = UDim2.new(1, -72, 0.5, -11)
+    KeyBtn.Size = UDim2.fromOffset(72, 22)
+    KeyBtn.BackgroundColor3 = Theme.Element
+    KeyBtn.AutoButtonColor = false
+    KeyBtn.Font = Enum.Font.Gotham
+    KeyBtn.TextSize = 12
+    KeyBtn.TextColor3 = Theme.Text
+    KeyBtn.Text = default and default.Name or "..."
+    KeyBtn.Parent = Container
+    corner(KeyBtn, 5)
+
+    KeyBtn.MouseButton1Click:Connect(function()
+        KeyBtn.Text = "..."
+        window:CaptureNextKey(function(keyCode)
+            KeyBtn.Text = keyCode.Name
+            window:SetToggleKey(keyCode)
+            if callback then callback(keyCode) end
+        end)
+    end)
+
+    return KeyBtn
 end
 
 return Library
