@@ -1,3 +1,20 @@
+--[[
+    CustomLib_TopTabs (v3)
+
+    Новое в этой версии:
+      - Живая смена темы: Window:SetTheme("Ocean") и т.п. — меняет цвета
+        уже существующих элементов без пересоздания меню (через реестр
+        "themed"-инстансов и функции-геттеры, которые перечитывают Theme
+        заново на каждое применение).
+      - Список кейбиндов (Window:SetKeybindListVisible(true)) — отдельная
+        перетаскиваемая панель, куда автоматически попадает любой Keybind,
+        созданный через Section:AddKeybind(...).
+      - Section:AddKeybind больше НЕ привязывает жёстко новую клавишу к
+        открытию меню — теперь это просто "захват клавиши", а что с ней
+        делать, решает callback (см. пример: там Menu Toggle Key явно
+        вызывает Window:SetToggleKey(...) в своём собственном callback-е).
+]]
+
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players          = game:GetService("Players")
@@ -6,19 +23,63 @@ local CoreGui          = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
--- ====================== ТЕМА (чёрно-белая) ======================
-local Theme = {
-    Background = Color3.fromRGB(14, 14, 16),
-    TopBar     = Color3.fromRGB(19, 19, 22),
-    Section    = Color3.fromRGB(21, 21, 24),
-    Element    = Color3.fromRGB(31, 31, 35),
-    Accent     = Color3.fromRGB(255, 255, 255), -- белый акцент вместо зелёного
-    Text       = Color3.fromRGB(198, 198, 203),
-    SubText    = Color3.fromRGB(126, 126, 134),
-    Disabled   = Color3.fromRGB(78, 78, 84),
-    Stroke     = Color3.fromRGB(44, 44, 50),
-    White      = Color3.fromRGB(255, 255, 255),
+-- ====================== ТЕМЫ ======================
+-- Между темами меняются только "структурные" цвета (фон/акцент/обводка).
+-- Текст (Text/SubText/Disabled/White) везде одинаковый и не темизируется —
+-- чтобы читаемость не зависела от выбранной темы.
+local FixedColors = {
+    Text     = Color3.fromRGB(198, 198, 203),
+    SubText  = Color3.fromRGB(126, 126, 134),
+    Disabled = Color3.fromRGB(78, 78, 84),
+    White    = Color3.fromRGB(255, 255, 255),
 }
+
+local Themes = {
+    Monochrome = {
+        Background = Color3.fromRGB(14, 14, 16),
+        TopBar     = Color3.fromRGB(19, 19, 22),
+        Section    = Color3.fromRGB(21, 21, 24),
+        Element    = Color3.fromRGB(31, 31, 35),
+        Accent     = Color3.fromRGB(255, 255, 255),
+        Stroke     = Color3.fromRGB(44, 44, 50),
+    },
+    Crimson = {
+        Background = Color3.fromRGB(16, 12, 13),
+        TopBar     = Color3.fromRGB(22, 16, 17),
+        Section    = Color3.fromRGB(24, 17, 18),
+        Element    = Color3.fromRGB(36, 24, 25),
+        Accent     = Color3.fromRGB(230, 70, 70),
+        Stroke     = Color3.fromRGB(50, 32, 33),
+    },
+    Ocean = {
+        Background = Color3.fromRGB(11, 14, 17),
+        TopBar     = Color3.fromRGB(15, 19, 23),
+        Section    = Color3.fromRGB(17, 21, 26),
+        Element    = Color3.fromRGB(26, 32, 39),
+        Accent     = Color3.fromRGB(80, 160, 255),
+        Stroke     = Color3.fromRGB(35, 44, 53),
+    },
+    Violet = {
+        Background = Color3.fromRGB(15, 13, 17),
+        TopBar     = Color3.fromRGB(20, 17, 23),
+        Section    = Color3.fromRGB(22, 19, 25),
+        Element    = Color3.fromRGB(33, 28, 38),
+        Accent     = Color3.fromRGB(170, 110, 255),
+        Stroke     = Color3.fromRGB(47, 40, 54),
+    },
+    Emerald = {
+        Background = Color3.fromRGB(12, 15, 13),
+        TopBar     = Color3.fromRGB(17, 21, 18),
+        Section    = Color3.fromRGB(19, 23, 20),
+        Element    = Color3.fromRGB(28, 34, 29),
+        Accent     = Color3.fromRGB(80, 210, 120),
+        Stroke     = Color3.fromRGB(40, 49, 42),
+    },
+}
+
+local Theme = {}
+for k, v in pairs(FixedColors) do Theme[k] = v end
+for k, v in pairs(Themes.Monochrome) do Theme[k] = v end
 
 -- ====================== ХЕЛПЕРЫ ======================
 local function tween(obj, info, props)
@@ -53,7 +114,7 @@ local function padUniform(parent, all)
 end
 
 -- Всегда явно задаём SortOrder, иначе Roblox может сортировать детей
--- по имени инстанса, а не по порядку добавления (это и было причиной бага).
+-- по имени инстанса, а не по порядку добавления.
 local function listLayout(parent, padding, horizontal)
     local l = Instance.new("UIListLayout")
     l.SortOrder = Enum.SortOrder.LayoutOrder
@@ -70,6 +131,20 @@ local function track(list, conn)
     return conn
 end
 
+-- Регистрирует свойство инстанса как "тематическое": сразу применяет цвет
+-- из getter() и запоминает пару (инстанс, свойство, getter), чтобы при
+-- смене темы можно было применить их заново. getter — функция, а не готовое
+-- значение, потому что для динамических элементов (например, тоггл в
+-- состоянии ON/OFF) правильный цвет зависит от текущего состояния, а не
+-- только от темы.
+local function reg(list, instance, prop, getter)
+    instance[prop] = getter()
+    if list then
+        table.insert(list, {Instance = instance, Prop = prop, Getter = getter})
+    end
+    return instance
+end
+
 -- ====================== МЕТАТАБЛИЦЫ КЛАССОВ ======================
 local Window   = {}; Window.__index = Window
 local MainTab  = {}; MainTab.__index = MainTab
@@ -77,6 +152,8 @@ local SubTab   = {}; SubTab.__index = SubTab
 local Section  = {}; Section.__index = Section
 
 local Library = {}
+Library.Themes = Themes
+Library.ThemeNames = { "Monochrome", "Crimson", "Ocean", "Violet", "Emerald" }
 
 -- ====================== ОКНО ======================
 function Library:CreateWindow(config)
@@ -84,6 +161,8 @@ function Library:CreateWindow(config)
     local title    = config.Title or "Menu"
     local subtitle = config.Subtitle or ""
     local size     = config.Size or UDim2.fromOffset(700, 520)
+
+    local themedList = {}
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "CustomLibTopTabsGui"
@@ -100,12 +179,12 @@ function Library:CreateWindow(config)
     Main.AnchorPoint = Vector2.new(0.5, 0.5)
     Main.Position = UDim2.fromScale(0.5, 0.5)
     Main.Size = size
-    Main.BackgroundColor3 = Theme.Background
     Main.BorderSizePixel = 0
     Main.ClipsDescendants = true
     Main.Parent = ScreenGui
     corner(Main, 10)
-    stroke(Main, Theme.Stroke, 1)
+    reg(themedList, Main, "BackgroundColor3", function() return Theme.Background end)
+    reg(themedList, stroke(Main, Theme.Stroke, 1), "Color", function() return Theme.Stroke end)
 
     local UIScale = Instance.new("UIScale")
     UIScale.Scale = 1
@@ -114,16 +193,17 @@ function Library:CreateWindow(config)
     -- ---- Верхняя шапка ----
     local TopBar = Instance.new("Frame")
     TopBar.Size = UDim2.new(1, 0, 0, 36)
-    TopBar.BackgroundColor3 = Theme.TopBar
     TopBar.BorderSizePixel = 0
     TopBar.Parent = Main
     corner(TopBar, 10)
+    reg(themedList, TopBar, "BackgroundColor3", function() return Theme.TopBar end)
+
     local TopBarFix = Instance.new("Frame")
-    TopBarFix.BackgroundColor3 = Theme.TopBar
     TopBarFix.BorderSizePixel = 0
     TopBarFix.Position = UDim2.new(0, 0, 1, -10)
     TopBarFix.Size = UDim2.new(1, 0, 0, 10)
     TopBarFix.Parent = TopBar
+    reg(themedList, TopBarFix, "BackgroundColor3", function() return Theme.TopBar end)
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.BackgroundTransparency = 1
@@ -195,9 +275,9 @@ function Library:CreateWindow(config)
     local MainTabBar = Instance.new("Frame")
     MainTabBar.Position = UDim2.new(0, 0, 0, 36)
     MainTabBar.Size = UDim2.new(1, 0, 0, 40)
-    MainTabBar.BackgroundColor3 = Theme.TopBar
     MainTabBar.BorderSizePixel = 0
     MainTabBar.Parent = Main
+    reg(themedList, MainTabBar, "BackgroundColor3", function() return Theme.TopBar end)
 
     local mainTabList = listLayout(MainTabBar, 28, true)
     mainTabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -221,7 +301,11 @@ function Library:CreateWindow(config)
         Visible = true,
         OriginalSize = size,
         Connections = connections,
+        ThemedInstances = themedList,
+        CurrentThemeName = "Monochrome",
         ToggleKey = config.ToggleKey or Enum.KeyCode.RightControl,
+        KeybindListFrame = nil,
+        KeybindRows = {},
     }, Window)
 
     CloseBtn.MouseButton1Click:Connect(function() self:SetVisible(false) end)
@@ -260,12 +344,28 @@ function Window:SetVisible(state)
     end
 end
 
--- ---- Настройки самого меню ----
+-- ---- Темы ----
+function Window:SetTheme(name)
+    local preset = Themes[name]
+    if not preset then return end
+    for k, v in pairs(preset) do
+        Theme[k] = v
+    end
+    for _, entry in ipairs(self.ThemedInstances) do
+        pcall(function()
+            tween(entry.Instance, TweenInfo.new(0.2), {[entry.Prop] = entry.Getter()})
+        end)
+    end
+    self.CurrentThemeName = name
+end
+
+-- ---- Прочие настройки самого меню ----
 function Window:SetToggleKey(keyCode)
     self.ToggleKey = keyCode
 end
 
--- Ждём следующее нажатие клавиши и передаём её в callback (для UI ребиндинга)
+-- Ждём следующее нажатие клавиши и передаём её в callback.
+-- Что делать с этой клавишей — решает вызывающий код (см. Section:AddKeybind).
 function Window:CaptureNextKey(callback)
     local conn
     conn = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -301,6 +401,86 @@ function Window:Destroy()
     end)
 end
 
+-- ---- Список кейбиндов (отдельная перетаскиваемая панель) ----
+function Window:_ensureKeybindList()
+    if self.KeybindListFrame then return end
+
+    local Frame = Instance.new("Frame")
+    Frame.Name = "KeybindList"
+    Frame.Position = UDim2.new(0, 16, 0, 16)
+    Frame.Size = UDim2.new(0, 170, 0, 0)
+    Frame.AutomaticSize = Enum.AutomaticSize.Y
+    Frame.BorderSizePixel = 0
+    Frame.Visible = false
+    Frame.Parent = self.ScreenGui
+    corner(Frame, 6)
+    reg(self.ThemedInstances, Frame, "BackgroundColor3", function() return Theme.Section end)
+    reg(self.ThemedInstances, stroke(Frame, Theme.Stroke, 1), "Color", function() return Theme.Stroke end)
+
+    listLayout(Frame, 4)
+    padUniform(Frame, 8)
+
+    local Title = Instance.new("TextLabel")
+    Title.BackgroundTransparency = 1
+    Title.Size = UDim2.new(1, 0, 0, 14)
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 12
+    Title.TextColor3 = Theme.SubText
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Text = "Keybinds"
+    Title.LayoutOrder = 0
+    Title.Parent = Frame
+
+    -- Перетаскивание панели
+    do
+        local dragging, dragStart, startPos
+        track(self.Connections, Frame.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = input.Position
+                startPos = Frame.Position
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                end)
+            end
+        end))
+        track(self.Connections, UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStart
+                Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end))
+    end
+
+    self.KeybindListFrame = Frame
+end
+
+function Window:SetKeybindListVisible(state)
+    self:_ensureKeybindList()
+    self.KeybindListFrame.Visible = state
+end
+
+-- Добавляет строку в список и возвращает функцию для обновления текста клавиши
+function Window:_addKeybindRow(label, initialKeyName)
+    self:_ensureKeybindList()
+
+    local Row = Instance.new("TextLabel")
+    Row.BackgroundTransparency = 1
+    Row.Size = UDim2.new(1, 0, 0, 14)
+    Row.Font = Enum.Font.Gotham
+    Row.TextSize = 12
+    Row.TextXAlignment = Enum.TextXAlignment.Left
+    Row.Text = label .. ": " .. initialKeyName
+    Row.Parent = self.KeybindListFrame
+    reg(self.ThemedInstances, Row, "TextColor3", function() return Theme.Text end)
+
+    table.insert(self.KeybindRows, Row)
+
+    return function(newKeyName)
+        Row.Text = label .. ": " .. newKeyName
+    end
+end
+
 -- ====================== ГЛАВНЫЕ ВКЛАДКИ ======================
 function Window:AddMainTab(name)
     local Btn = Instance.new("TextButton")
@@ -313,18 +493,17 @@ function Window:AddMainTab(name)
     Btn.Text = name
     Btn.Parent = self.MainTabBar
 
-    -- Полоска-индикатор — РЕБЁНОК самой кнопки. Она физически не может
-    -- оказаться "не под своей вкладкой", потому что её размер и позиция
-    -- заданы в масштабе (Scale) относительно родителя, а не в абсолютных
-    -- пикселях экрана — никакой зависимости от таймингов пересчёта layout.
+    -- Полоска-индикатор — ребёнок самой кнопки: её размер/позиция заданы в
+    -- масштабе относительно родителя, поэтому она не может "уехать" не под
+    -- свою вкладку независимо от таймингов пересчёта layout.
     local UnderlineBar = Instance.new("Frame")
     UnderlineBar.AnchorPoint = Vector2.new(0.5, 0)
     UnderlineBar.Position = UDim2.new(0.5, 0, 1, 6)
     UnderlineBar.Size = UDim2.new(0, 0, 0, 2)
-    UnderlineBar.BackgroundColor3 = Theme.Accent
     UnderlineBar.BackgroundTransparency = 1
     UnderlineBar.BorderSizePixel = 0
     UnderlineBar.Parent = Btn
+    reg(self.ThemedInstances, UnderlineBar, "BackgroundColor3", function() return Theme.Accent end)
 
     local Host = Instance.new("Frame")
     Host.Size = UDim2.fromScale(1, 1)
@@ -359,6 +538,12 @@ function Window:AddMainTab(name)
     }, MainTab)
 
     table.insert(self.MainTabs, tabObj)
+
+    -- Активная вкладка красится в акцент темы — регистрируем как "тематическую"
+    -- с геттером, который проверяет, выбрана ли она СЕЙЧАС.
+    reg(self.ThemedInstances, Btn, "TextColor3", function()
+        return (windowRef.CurrentMainTab == tabObj) and Theme.Accent or Theme.SubText
+    end)
 
     track(self.Connections, Btn.MouseButton1Click:Connect(function()
         windowRef:SelectMainTab(tabObj)
@@ -405,10 +590,11 @@ end
 
 -- ====================== ПОД-ВКЛАДКИ ======================
 function MainTab:AddSubTab(name)
+    local window = self.Window
+
     local Btn = Instance.new("TextButton")
     Btn.AutomaticSize = Enum.AutomaticSize.X
     Btn.Size = UDim2.fromOffset(0, 30)
-    Btn.BackgroundColor3 = Theme.Element
     Btn.AutoButtonColor = false
     Btn.Font = Enum.Font.Gotham
     Btn.TextSize = 13
@@ -429,11 +615,11 @@ function MainTab:AddSubTab(name)
     Left.BackgroundTransparency = 1
     Left.BorderSizePixel = 0
     Left.ScrollBarThickness = 3
-    Left.ScrollBarImageColor3 = Theme.Accent
     Left.CanvasSize = UDim2.new(0, 0, 0, 0)
     Left.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Left.Parent = Page
     listLayout(Left, 10)
+    reg(window.ThemedInstances, Left, "ScrollBarImageColor3", function() return Theme.Accent end)
 
     local Right = Instance.new("ScrollingFrame")
     Right.Size = UDim2.new(0.5, -6, 1, 0)
@@ -441,15 +627,16 @@ function MainTab:AddSubTab(name)
     Right.BackgroundTransparency = 1
     Right.BorderSizePixel = 0
     Right.ScrollBarThickness = 3
-    Right.ScrollBarImageColor3 = Theme.Accent
     Right.CanvasSize = UDim2.new(0, 0, 0, 0)
     Right.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Right.Parent = Page
     listLayout(Right, 10)
+    reg(window.ThemedInstances, Right, "ScrollBarImageColor3", function() return Theme.Accent end)
 
     local mainTabRef = self
     local subTab = setmetatable({
         MainTab = mainTabRef,
+        Window = window,
         Button = Btn,
         Page = Page,
         Left = Left,
@@ -458,16 +645,20 @@ function MainTab:AddSubTab(name)
 
     table.insert(self.SubTabs, subTab)
 
-    local conns = self.Window.Connections
-    track(conns, Btn.MouseButton1Click:Connect(function()
+    -- Фон кнопки таба зависит от состояния (активна/неактивна) — тематический геттер
+    reg(window.ThemedInstances, Btn, "BackgroundColor3", function()
+        return (mainTabRef.CurrentSubTab == subTab) and Theme.Accent or Theme.Element
+    end)
+
+    track(window.Connections, Btn.MouseButton1Click:Connect(function()
         mainTabRef:SelectSubTab(subTab)
     end))
-    track(conns, Btn.MouseEnter:Connect(function()
+    track(window.Connections, Btn.MouseEnter:Connect(function()
         if mainTabRef.CurrentSubTab ~= subTab then
             tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Stroke})
         end
     end))
-    track(conns, Btn.MouseLeave:Connect(function()
+    track(window.Connections, Btn.MouseLeave:Connect(function()
         if mainTabRef.CurrentSubTab ~= subTab then
             tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element})
         end
@@ -500,15 +691,15 @@ function MainTab:SelectSubTab(subTab)
 end
 
 -- ====================== СЕКЦИИ ======================
-local function buildSection(parent, name)
+local function buildSection(parent, name, window)
     local Frame = Instance.new("Frame")
-    Frame.BackgroundColor3 = Theme.Section
     Frame.BorderSizePixel = 0
     Frame.Size = UDim2.new(1, 0, 0, 0)
     Frame.AutomaticSize = Enum.AutomaticSize.Y
     Frame.Parent = parent
     corner(Frame, 8)
-    stroke(Frame, Theme.Stroke, 1)
+    reg(window.ThemedInstances, Frame, "BackgroundColor3", function() return Theme.Section end)
+    reg(window.ThemedInstances, stroke(Frame, Theme.Stroke, 1), "Color", function() return Theme.Stroke end)
 
     listLayout(Frame, 6)
     padUniform(Frame, 10)
@@ -524,15 +715,15 @@ local function buildSection(parent, name)
     Title.LayoutOrder = 0
     Title.Parent = Frame
 
-    return setmetatable({ Frame = Frame, Order = 1 }, Section)
+    return setmetatable({ Frame = Frame, Order = 1, Window = window }, Section)
 end
 
 function SubTab:AddLeftSection(name)
-    return buildSection(self.Left, name)
+    return buildSection(self.Left, name, self.Window)
 end
 
 function SubTab:AddRightSection(name)
-    return buildSection(self.Right, name)
+    return buildSection(self.Right, name, self.Window)
 end
 
 function Section:_order()
@@ -543,6 +734,7 @@ end
 -- ---- Toggle ----
 function Section:AddToggle(text, default, callback)
     default = default or false
+    local window = self.Window
 
     local Row = Instance.new("TextButton")
     Row.Size = UDim2.new(1, 0, 0, 26)
@@ -555,15 +747,12 @@ function Section:AddToggle(text, default, callback)
     local Track = Instance.new("Frame")
     Track.Size = UDim2.fromOffset(32, 16)
     Track.Position = UDim2.new(0, 0, 0.5, -8)
-    Track.BackgroundColor3 = default and Theme.Accent or Theme.Element
     Track.Parent = Row
     corner(Track, 8)
-    stroke(Track, Theme.Stroke, 1)
+    reg(window.ThemedInstances, stroke(Track, Theme.Stroke, 1), "Color", function() return Theme.Stroke end)
 
     local Knob = Instance.new("Frame")
     Knob.Size = UDim2.fromOffset(12, 12)
-    Knob.Position = default and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
-    Knob.BackgroundColor3 = default and Color3.fromRGB(20, 20, 20) or Theme.White
     Knob.Parent = Track
     corner(Knob, 6)
 
@@ -573,20 +762,44 @@ function Section:AddToggle(text, default, callback)
     Label.Size = UDim2.new(1, -40, 1, 0)
     Label.Font = Enum.Font.Gotham
     Label.TextSize = 14
-    Label.TextColor3 = default and Theme.Accent or Theme.Text
     Label.TextXAlignment = Enum.TextXAlignment.Left
     Label.Text = text
     Label.Parent = Row
 
     local state = default
+
+    reg(window.ThemedInstances, Track, "BackgroundColor3", function()
+        return state and Theme.Accent or Theme.Element
+    end)
+    reg(window.ThemedInstances, Knob, "BackgroundColor3", function()
+        return state and Color3.fromRGB(20, 20, 20) or Theme.White
+    end)
+    reg(window.ThemedInstances, Label, "TextColor3", function()
+        return state and Theme.Accent or Theme.Text
+    end)
+
+    local function applyPositions(animate)
+        local trackColor = state and Theme.Accent or Theme.Element
+        local knobColor = state and Color3.fromRGB(20, 20, 20) or Theme.White
+        local knobPos = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+        local textColor = state and Theme.Accent or Theme.Text
+
+        if animate then
+            tween(Track, TweenInfo.new(0.15), {BackgroundColor3 = trackColor})
+            tween(Knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {Position = knobPos, BackgroundColor3 = knobColor})
+            tween(Label, TweenInfo.new(0.15), {TextColor3 = textColor})
+        else
+            Track.BackgroundColor3 = trackColor
+            Knob.Position = knobPos
+            Knob.BackgroundColor3 = knobColor
+            Label.TextColor3 = textColor
+        end
+    end
+    applyPositions(false)
+
     local function set(v, fire)
         state = v
-        tween(Track, TweenInfo.new(0.15), {BackgroundColor3 = state and Theme.Accent or Theme.Element})
-        tween(Knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-            Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6),
-            BackgroundColor3 = state and Color3.fromRGB(20, 20, 20) or Theme.White,
-        })
-        tween(Label, TweenInfo.new(0.15), {TextColor3 = state and Theme.Accent or Theme.Text})
+        applyPositions(true)
         if fire ~= false and callback then callback(state) end
     end
 
@@ -597,6 +810,8 @@ end
 
 -- ---- Placeholder ----
 function Section:AddPlaceholder(text)
+    local window = self.Window
+
     local Row = Instance.new("Frame")
     Row.Size = UDim2.new(1, 0, 0, 26)
     Row.BackgroundTransparency = 1
@@ -606,10 +821,10 @@ function Section:AddPlaceholder(text)
     local Track = Instance.new("Frame")
     Track.Size = UDim2.fromOffset(32, 16)
     Track.Position = UDim2.new(0, 0, 0.5, -8)
-    Track.BackgroundColor3 = Theme.Element
     Track.BackgroundTransparency = 0.4
     Track.Parent = Row
     corner(Track, 8)
+    reg(window.ThemedInstances, Track, "BackgroundColor3", function() return Theme.Element end)
 
     local Label = Instance.new("TextLabel")
     Label.BackgroundTransparency = 1
@@ -642,6 +857,7 @@ function Section:AddSlider(text, min, max, default, unit, callback)
     max = max or 100
     default = math.clamp(default or min, min, max)
     unit = unit or ""
+    local window = self.Window
 
     local Container = Instance.new("Frame")
     Container.Size = UDim2.new(1, 0, 0, 40)
@@ -662,22 +878,22 @@ function Section:AddSlider(text, min, max, default, unit, callback)
     local Bar = Instance.new("Frame")
     Bar.Position = UDim2.new(0, 0, 0, 20)
     Bar.Size = UDim2.new(1, 0, 0, 18)
-    Bar.BackgroundColor3 = Theme.Element
     Bar.Parent = Container
     corner(Bar, 4)
+    reg(window.ThemedInstances, Bar, "BackgroundColor3", function() return Theme.Element end)
 
     local Fill = Instance.new("Frame")
-    Fill.BackgroundColor3 = Theme.Accent
     Fill.Size = UDim2.fromScale((default - min) / (max - min), 1)
     Fill.Parent = Bar
     corner(Fill, 4)
+    reg(window.ThemedInstances, Fill, "BackgroundColor3", function() return Theme.Accent end)
 
     local ValueLabel = Instance.new("TextLabel")
     ValueLabel.BackgroundTransparency = 1
     ValueLabel.Size = UDim2.fromScale(1, 1)
     ValueLabel.Font = Enum.Font.GothamBold
     ValueLabel.TextSize = 12
-    ValueLabel.TextColor3 = Color3.fromRGB(20, 20, 20) -- Чёрный текст
+    ValueLabel.TextColor3 = Color3.fromRGB(20, 20, 20)
     ValueLabel.Text = tostring(default) .. unit .. "/" .. tostring(max) .. unit
     ValueLabel.ZIndex = 2
     ValueLabel.Parent = Bar
@@ -686,20 +902,13 @@ function Section:AddSlider(text, min, max, default, unit, callback)
     local function update(inputPos)
         local rel = math.clamp((inputPos.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
         local value = math.floor(min + (max - min) * rel + 0.5)
-        
-        tween(Fill, TweenInfo.new(0.05), {
-            Size = UDim2.fromScale(rel, 1)
-        })
-        
+
+        tween(Fill, TweenInfo.new(0.05), {Size = UDim2.fromScale(rel, 1)})
         ValueLabel.Text = tostring(value) .. unit .. "/" .. tostring(max) .. unit
-        
-        -- Автоматическая смена цвета текста в зависимости от заполнения
-        if rel > 0.15 then
-            ValueLabel.TextColor3 = Color3.fromRGB(20, 20, 20) -- Чёрный на белом
-        else
-            ValueLabel.TextColor3 = Theme.Text -- Белый на тёмном
-        end
-        
+
+        -- Автоматический контраст текста в зависимости от заполнения полосы
+        ValueLabel.TextColor3 = (rel > 0.15) and Color3.fromRGB(20, 20, 20) or Theme.Text
+
         if callback then callback(value) end
     end
 
@@ -709,13 +918,11 @@ function Section:AddSlider(text, min, max, default, unit, callback)
             update(input.Position)
         end
     end)
-    
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
-    
     UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             update(input.Position)
@@ -729,13 +936,14 @@ end
 function Section:AddDropdown(text, options, default, callback)
     options = options or {}
     default = default or options[1] or ""
+    local window = self.Window
 
     local Container = Instance.new("Frame")
     Container.Size = UDim2.new(1, 0, 0, 40)
     Container.BackgroundTransparency = 1
+    Container.ClipsDescendants = false
     Container.LayoutOrder = self:_order()
     Container.Parent = self.Frame
-    Container.ClipsDescendants = false -- Важно, чтобы список не обрезался
 
     local Label = Instance.new("TextLabel")
     Label.BackgroundTransparency = 1
@@ -750,11 +958,11 @@ function Section:AddDropdown(text, options, default, callback)
     local Head = Instance.new("TextButton")
     Head.Position = UDim2.new(0, 0, 0, 20)
     Head.Size = UDim2.new(1, 0, 0, 20)
-    Head.BackgroundColor3 = Theme.Element
     Head.AutoButtonColor = false
     Head.Text = ""
     Head.Parent = Container
     corner(Head, 5)
+    reg(window.ThemedInstances, Head, "BackgroundColor3", function() return Theme.Element end)
 
     local SelectedLabel = Instance.new("TextLabel")
     SelectedLabel.BackgroundTransparency = 1
@@ -780,36 +988,24 @@ function Section:AddDropdown(text, options, default, callback)
     local List = Instance.new("Frame")
     List.Position = UDim2.new(0, 0, 0, 44)
     List.Size = UDim2.new(1, 0, 0, 0)
-    List.BackgroundColor3 = Theme.Element
     List.ClipsDescendants = true
     List.Visible = false
     List.ZIndex = 5
     List.Parent = Container
     corner(List, 5)
+    reg(window.ThemedInstances, List, "BackgroundColor3", function() return Theme.Element end)
     listLayout(List, 0)
 
     local open = false
     local listHeight = #options * 22
-    
+
     local function close()
         open = false
-        
-        tween(Arrow, TweenInfo.new(0.15), {
-            Rotation = 0
-        })
-        
-        tween(Container, TweenInfo.new(0.15), {
-            Size = UDim2.new(1, 0, 0, 40)
-        })
-        
-        local t = tween(List, TweenInfo.new(0.15), {
-            Size = UDim2.new(1, 0, 0, 0)
-        })
-        
+        tween(Arrow, TweenInfo.new(0.15), {Rotation = 0})
+        tween(Container, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 40)})
+        local t = tween(List, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 0)})
         t.Completed:Connect(function()
-            if not open then
-                List.Visible = false
-            end
+            if not open then List.Visible = false end
         end)
     end
 
@@ -836,39 +1032,28 @@ function Section:AddDropdown(text, options, default, callback)
 
     Head.MouseButton1Click:Connect(function()
         open = not open
-        
         if open then
             List.Visible = true
-            
-            tween(Arrow, TweenInfo.new(0.15), {
-                Rotation = 180
-            })
-            
-            tween(List, TweenInfo.new(0.15), {
-                Size = UDim2.new(1, 0, 0, listHeight)
-            })
-            
-            tween(Container, TweenInfo.new(0.15), {
-                Size = UDim2.new(1, 0, 0, 40 + listHeight)
-            })
+            tween(Arrow, TweenInfo.new(0.15), {Rotation = 180})
+            tween(List, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, listHeight)})
+            tween(Container, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 40 + listHeight)})
         else
             close()
         end
     end)
 
-    return { 
-        Set = function(_, v) 
-            SelectedLabel.Text = tostring(v) 
-        end,
-        Close = close -- Добавляем возможность закрыть дропдаун программно
+    return {
+        Set = function(_, v) SelectedLabel.Text = tostring(v) end,
+        Close = close,
     }
 end
 
 -- ---- Button ----
 function Section:AddButton(text, callback)
+    local window = self.Window
+
     local Btn = Instance.new("TextButton")
     Btn.Size = UDim2.new(1, 0, 0, 28)
-    Btn.BackgroundColor3 = Theme.Element
     Btn.AutoButtonColor = false
     Btn.Font = Enum.Font.Gotham
     Btn.TextSize = 13
@@ -877,6 +1062,7 @@ function Section:AddButton(text, callback)
     Btn.LayoutOrder = self:_order()
     Btn.Parent = self.Frame
     corner(Btn, 6)
+    reg(window.ThemedInstances, Btn, "BackgroundColor3", function() return Theme.Element end)
 
     Btn.MouseEnter:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Accent, TextColor3 = Color3.fromRGB(20,20,20)}) end)
     Btn.MouseLeave:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element, TextColor3 = Theme.Text}) end)
@@ -900,7 +1086,8 @@ function Section:AddLabel(text)
     return Label
 end
 
--- ---- Keybind-кнопка: клик -> "Press a key..." -> следующая нажатая клавиша ----
+-- ---- Keybind: клик -> "..." -> следующая нажатая клавиша идёт в callback.
+-- Автоматически появляется строкой в Window:SetKeybindListVisible(true) панели.
 function Section:AddKeybind(text, window, default, callback)
     local Container = Instance.new("Frame")
     Container.Size = UDim2.new(1, 0, 0, 26)
@@ -921,7 +1108,6 @@ function Section:AddKeybind(text, window, default, callback)
     local KeyBtn = Instance.new("TextButton")
     KeyBtn.Position = UDim2.new(1, -72, 0.5, -11)
     KeyBtn.Size = UDim2.fromOffset(72, 22)
-    KeyBtn.BackgroundColor3 = Theme.Element
     KeyBtn.AutoButtonColor = false
     KeyBtn.Font = Enum.Font.Gotham
     KeyBtn.TextSize = 12
@@ -929,12 +1115,15 @@ function Section:AddKeybind(text, window, default, callback)
     KeyBtn.Text = default and default.Name or "..."
     KeyBtn.Parent = Container
     corner(KeyBtn, 5)
+    reg(window.ThemedInstances, KeyBtn, "BackgroundColor3", function() return Theme.Element end)
+
+    local updateListRow = window:_addKeybindRow(text, KeyBtn.Text)
 
     KeyBtn.MouseButton1Click:Connect(function()
         KeyBtn.Text = "..."
         window:CaptureNextKey(function(keyCode)
             KeyBtn.Text = keyCode.Name
-            window:SetToggleKey(keyCode)
+            updateListRow(keyCode.Name)
             if callback then callback(keyCode) end
         end)
     end)
