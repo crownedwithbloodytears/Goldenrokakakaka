@@ -1,28 +1,32 @@
 --[[
-CustomLib_TopTabs (v3.1 — fixed)
+CustomLib_TopTabs (v4.0)
 
-Изменения относительно v3:
-- [FIX] Слайдеры больше не утекают: Bar.InputBegan и глобальные
-  UserInputService.InputEnded/InputChanged регистрируются через track()
-  и отключаются в Window:Destroy().
-- [FIX] Тема теперь у каждого окна своя (self.Theme). SetTheme одного окна
-  не влияет на другие окна.
-- [FIX] Все кликовые коннекты регистрируются через track().
-- [API] Section:AddKeybind(text, default, callback) — без параметра window.
-- [API] Section:AddSlider возвращает { Set, Get }.
-- [API] Dropdown:Set валидирует значение и вызывает callback; добавлен Get.
+Новое в v4.0 (сверх v3.1):
+- Flags + SaveConfig/LoadConfig/ListConfigs (JSON через writefile, если доступно).
+- safeCall: все callback'и защищены pcall.
+- Поиск по элементам (строка в шапке).
+- Window:Notify — всплывающие уведомления.
+- Ленивая отрисовка под-вкладок: Tab:AddSubTab(name, builder).
+- Сворачиваемые секции (клик по заголовку).
+- Новые компоненты: AddColorpicker, AddInput.
+- opts.Flag доступен у Toggle/Slider/Dropdown/Keybind/Input/Colorpicker.
 ]]
 
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players          = game:GetService("Players")
 local CoreGui          = game:GetService("CoreGui")
+local HttpService      = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Доступен ли файловый API исполнителя (для конфигов).
+local hasFileIO = (typeof(writefile) == "function")
+	and (typeof(readfile) == "function")
+	and (typeof(isfile) == "function")
+
 -- ====================== ТЕМЫ ======================
--- Текст (Text/SubText/Disabled/White) не темизируется — читаемость не зависит от темы.
 local FixedColors = {
 	Text     = Color3.fromRGB(198, 198, 203),
 	SubText  = Color3.fromRGB(126, 126, 134),
@@ -31,46 +35,11 @@ local FixedColors = {
 }
 
 local Themes = {
-	Monochrome = {
-		Background = Color3.fromRGB(14, 14, 16),
-		TopBar     = Color3.fromRGB(19, 19, 22),
-		Section    = Color3.fromRGB(21, 21, 24),
-		Element    = Color3.fromRGB(31, 31, 35),
-		Accent     = Color3.fromRGB(255, 255, 255),
-		Stroke     = Color3.fromRGB(44, 44, 50),
-	},
-	Crimson = {
-		Background = Color3.fromRGB(16, 12, 13),
-		TopBar     = Color3.fromRGB(22, 16, 17),
-		Section    = Color3.fromRGB(24, 17, 18),
-		Element    = Color3.fromRGB(36, 24, 25),
-		Accent     = Color3.fromRGB(230, 70, 70),
-		Stroke     = Color3.fromRGB(50, 32, 33),
-	},
-	Ocean = {
-		Background = Color3.fromRGB(11, 14, 17),
-		TopBar     = Color3.fromRGB(15, 19, 23),
-		Section    = Color3.fromRGB(17, 21, 26),
-		Element    = Color3.fromRGB(26, 32, 39),
-		Accent     = Color3.fromRGB(80, 160, 255),
-		Stroke     = Color3.fromRGB(35, 44, 53),
-	},
-	Violet = {
-		Background = Color3.fromRGB(15, 13, 17),
-		TopBar     = Color3.fromRGB(20, 17, 23),
-		Section    = Color3.fromRGB(22, 19, 25),
-		Element    = Color3.fromRGB(33, 28, 38),
-		Accent     = Color3.fromRGB(170, 110, 255),
-		Stroke     = Color3.fromRGB(47, 40, 54),
-	},
-	Emerald = {
-		Background = Color3.fromRGB(12, 15, 13),
-		TopBar     = Color3.fromRGB(17, 21, 18),
-		Section    = Color3.fromRGB(19, 23, 20),
-		Element    = Color3.fromRGB(28, 34, 29),
-		Accent     = Color3.fromRGB(80, 210, 120),
-		Stroke     = Color3.fromRGB(40, 49, 42),
-	},
+	Monochrome = { Background = Color3.fromRGB(14,14,16), TopBar = Color3.fromRGB(19,19,22), Section = Color3.fromRGB(21,21,24), Element = Color3.fromRGB(31,31,35), Accent = Color3.fromRGB(255,255,255), Stroke = Color3.fromRGB(44,44,50) },
+	Crimson    = { Background = Color3.fromRGB(16,12,13), TopBar = Color3.fromRGB(22,16,17), Section = Color3.fromRGB(24,17,18), Element = Color3.fromRGB(36,24,25), Accent = Color3.fromRGB(230,70,70),   Stroke = Color3.fromRGB(50,32,33) },
+	Ocean      = { Background = Color3.fromRGB(11,14,17), TopBar = Color3.fromRGB(15,19,23), Section = Color3.fromRGB(17,21,26), Element = Color3.fromRGB(26,32,39), Accent = Color3.fromRGB(80,160,255), Stroke = Color3.fromRGB(35,44,53) },
+	Violet     = { Background = Color3.fromRGB(15,13,17), TopBar = Color3.fromRGB(20,17,23), Section = Color3.fromRGB(22,19,25), Element = Color3.fromRGB(33,28,38), Accent = Color3.fromRGB(170,110,255), Stroke = Color3.fromRGB(47,40,54) },
+	Emerald    = { Background = Color3.fromRGB(12,15,13), TopBar = Color3.fromRGB(17,21,18), Section = Color3.fromRGB(19,23,20), Element = Color3.fromRGB(28,34,29), Accent = Color3.fromRGB(80,210,120), Stroke = Color3.fromRGB(40,49,42) },
 }
 
 -- ====================== ХЕЛПЕРЫ ======================
@@ -87,7 +56,6 @@ local function corner(parent, radius)
 	return c
 end
 
--- color теперь обязателен у всех вызывающих; fallback — нейтральный серый.
 local function stroke(parent, color, thickness)
 	local s = Instance.new("UIStroke")
 	s.Color = color or Color3.fromRGB(44, 44, 50)
@@ -122,10 +90,15 @@ local function track(list, conn)
 	return conn
 end
 
--- Регистрирует свойство инстанса как "тематическое": сразу применяет цвет из
--- getter() и запоминает (инстанс, свойство, getter) для повторного применения
--- при смене темы. getter — функция, потому что для динамических элементов
--- правильный цвет зависит от текущего состояния.
+-- Защищённый вызов пользовательского callback: ошибка не роняет меню.
+local function safeCall(fn, ...)
+	if type(fn) ~= "function" then return end
+	local ok, err = pcall(fn, ...)
+	if not ok then
+		warn("[CustomLib] Ошибка в callback: " .. tostring(err))
+	end
+end
+
 local function reg(list, instance, prop, getter)
 	instance[prop] = getter()
 	if list then
@@ -134,8 +107,7 @@ local function reg(list, instance, prop, getter)
 	return instance
 end
 
--- Универсальный, безопасно-отключаемый drag для фрейма.
--- Все коннекты регистрируются в connList для последующего Destroy().
+-- Универсальный, безопасно-отключаемый drag. Коннекты трекаются в connList.
 local function makeDraggable(frame, handle, connList)
 	local dragging, dragStart, startPos
 	track(connList, handle.InputBegan:Connect(function(input)
@@ -175,7 +147,6 @@ function Library:CreateWindow(config)
 	local subtitle = config.Subtitle or ""
 	local size     = config.Size or UDim2.fromOffset(700, 520)
 
-	-- Тема — своя для каждого окна.
 	local Theme = {}
 	for k, v in pairs(FixedColors) do Theme[k] = v end
 	for k, v in pairs(Themes.Monochrome) do Theme[k] = v end
@@ -238,7 +209,7 @@ function Library:CreateWindow(config)
 	local SubtitleLabel = Instance.new("TextLabel")
 	SubtitleLabel.BackgroundTransparency = 1
 	SubtitleLabel.Position = UDim2.new(0, 14, 0, 0)
-	SubtitleLabel.Size = UDim2.new(0, 260, 1, 0)
+	SubtitleLabel.Size = UDim2.new(0, 160, 1, 0)
 	SubtitleLabel.Font = Enum.Font.Gotham
 	SubtitleLabel.TextSize = 13
 	SubtitleLabel.TextColor3 = Theme.SubText
@@ -267,7 +238,23 @@ function Library:CreateWindow(config)
 		tween(CloseBtn, TweenInfo.new(0.15), {TextColor3 = Theme.SubText})
 	end))
 
-	-- Перетаскивание за шапку (коннекты трекаются внутри makeDraggable)
+	-- ---- Поиск ----
+	local SearchBox = Instance.new("TextBox")
+	SearchBox.Size = UDim2.fromOffset(150, 22)
+	SearchBox.Position = UDim2.new(1, -196, 0.5, -11)
+	SearchBox.Font = Enum.Font.Gotham
+	SearchBox.TextSize = 12
+	SearchBox.TextColor3 = Theme.Text
+	SearchBox.PlaceholderText = "Поиск..."
+	SearchBox.PlaceholderColor3 = Theme.SubText
+	SearchBox.Text = ""
+	SearchBox.ClearTextOnFocus = false
+	SearchBox.TextXAlignment = Enum.TextXAlignment.Left
+	SearchBox.Parent = TopBar
+	corner(SearchBox, 5)
+	reg(themedList, SearchBox, "BackgroundColor3", function() return Theme.Element end)
+	local sp = Instance.new("UIPadding"); sp.PaddingLeft = UDim.new(0, 8); sp.Parent = SearchBox
+
 	makeDraggable(Main, TopBar, connections)
 
 	-- ---- Ряд главных вкладок ----
@@ -281,7 +268,6 @@ function Library:CreateWindow(config)
 	local mainTabList = listLayout(MainTabBar, 28, true)
 	mainTabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-	-- ---- Контейнер контента ----
 	local ContentHost = Instance.new("Frame")
 	ContentHost.Position = UDim2.new(0, 0, 0, 76)
 	ContentHost.Size = UDim2.new(1, 0, 1, -76)
@@ -306,15 +292,24 @@ function Library:CreateWindow(config)
 		ToggleKey = config.ToggleKey or Enum.KeyCode.RightControl,
 		KeybindListFrame = nil,
 		KeybindRows = {},
+		-- v4.0:
+		Flags = {},
+		FlagSetters = {},
+		Registry = {},
+		Sections = {},
+		ConfigFolder = config.ConfigFolder or "CustomLibConfigs",
+		NotifHolder = nil,
 	}, Window)
 
 	track(self.Connections, CloseBtn.MouseButton1Click:Connect(function() self:SetVisible(false) end))
+	track(self.Connections, SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+		self:_applySearch(SearchBox.Text)
+	end))
 	track(self.Connections, UserInputService.InputBegan:Connect(function(input, gpe)
 		if gpe then return end
 		if input.KeyCode == self.ToggleKey then self:SetVisible(not self.Visible) end
 	end))
 
-	-- Анимация появления
 	Main.Size = UDim2.new(size.X.Scale, size.X.Offset, size.Y.Scale, math.floor(size.Y.Offset * 0.85))
 	Main.BackgroundTransparency = 1
 	tween(Main, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
@@ -344,14 +339,11 @@ function Window:SetVisible(state)
 	end
 end
 
--- ---- Темы ----
 function Window:SetTheme(name)
 	local preset = Themes[name]
 	if not preset then return end
 	local Theme = self.Theme
-	for k, v in pairs(preset) do
-		Theme[k] = v
-	end
+	for k, v in pairs(preset) do Theme[k] = v end
 	for _, entry in ipairs(self.ThemedInstances) do
 		pcall(function()
 			tween(entry.Instance, TweenInfo.new(0.2), {[entry.Prop] = entry.Getter()})
@@ -360,19 +352,17 @@ function Window:SetTheme(name)
 	self.CurrentThemeName = name
 end
 
--- ---- Прочие настройки меню ----
 function Window:SetToggleKey(keyCode)
 	self.ToggleKey = keyCode
 end
 
--- Ждёт следующее нажатие клавиши и передаёт его в callback.
 function Window:CaptureNextKey(callback)
 	local conn
 	conn = UserInputService.InputBegan:Connect(function(input, gpe)
 		if gpe then return end
 		if input.UserInputType == Enum.UserInputType.Keyboard then
 			conn:Disconnect()
-			if callback then callback(input.KeyCode) end
+			safeCall(callback, input.KeyCode)
 		end
 	end)
 	track(self.Connections, conn)
@@ -388,7 +378,6 @@ function Window:ResetPosition()
 	})
 end
 
--- Полная выгрузка: отключает ВСЕ коннекты (включая слайдеры) и уничтожает UI.
 function Window:Destroy()
 	for _, conn in ipairs(self.Connections) do
 		pcall(function() conn:Disconnect() end)
@@ -399,6 +388,176 @@ function Window:Destroy()
 	t.Completed:Connect(function()
 		self.ScreenGui:Destroy()
 	end)
+end
+
+-- ---- Поиск: фильтрация зарегистрированных элементов ----
+function Window:_registerElement(name, frame, sectionFrame)
+	table.insert(self.Registry, { Name = string.lower(tostring(name or "")), Frame = frame, Section = sectionFrame })
+end
+
+function Window:_applySearch(query)
+	local q = string.lower(query or "")
+	for _, e in ipairs(self.Registry) do
+		e.Frame.Visible = (q == "") or (string.find(e.Name, q, 1, true) ~= nil)
+	end
+	for _, secFrame in ipairs(self.Sections) do
+		if q == "" then
+			secFrame.Visible = true
+		else
+			local any = false
+			for _, ch in ipairs(secFrame:GetChildren()) do
+				if ch:IsA("GuiObject") and ch.LayoutOrder > 0 and ch.Visible then
+					any = true
+					break
+				end
+			end
+			secFrame.Visible = any
+		end
+	end
+end
+
+-- ---- Уведомления ----
+function Window:_ensureNotifHolder()
+	if self.NotifHolder then return end
+	local Holder = Instance.new("Frame")
+	Holder.Name = "Notifications"
+	Holder.AnchorPoint = Vector2.new(1, 1)
+	Holder.Position = UDim2.new(1, -16, 1, -16)
+	Holder.Size = UDim2.new(0, 240, 1, -32)
+	Holder.BackgroundTransparency = 1
+	Holder.Parent = self.ScreenGui
+	local l = listLayout(Holder, 6)
+	l.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	l.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	self.NotifHolder = Holder
+end
+
+function Window:Notify(opts)
+	opts = opts or {}
+	local Theme = self.Theme
+	self:_ensureNotifHolder()
+
+	local kind = opts.Type or "info"
+	local accent = (kind == "success" and Color3.fromRGB(80, 210, 120))
+		or (kind == "error" and Color3.fromRGB(230, 70, 70))
+		or Theme.Accent
+
+	local Card = Instance.new("Frame")
+	Card.Size = UDim2.new(1, 0, 0, 0)
+	Card.AutomaticSize = Enum.AutomaticSize.Y
+	Card.BackgroundColor3 = Theme.Section
+	Card.BackgroundTransparency = 1
+	Card.BorderSizePixel = 0
+	Card.Parent = self.NotifHolder
+	corner(Card, 6)
+	stroke(Card, Theme.Stroke, 1)
+	padUniform(Card, 8)
+	listLayout(Card, 2)
+
+	local Title = Instance.new("TextLabel")
+	Title.BackgroundTransparency = 1
+	Title.Size = UDim2.new(1, 0, 0, 15)
+	Title.Font = Enum.Font.GothamBold
+	Title.TextSize = 13
+	Title.TextColor3 = accent
+	Title.TextXAlignment = Enum.TextXAlignment.Left
+	Title.Text = opts.Title or "Notice"
+	Title.LayoutOrder = 0
+	Title.Parent = Card
+
+	local Body = Instance.new("TextLabel")
+	Body.BackgroundTransparency = 1
+	Body.Size = UDim2.new(1, 0, 0, 0)
+	Body.AutomaticSize = Enum.AutomaticSize.Y
+	Body.Font = Enum.Font.Gotham
+	Body.TextSize = 12
+	Body.TextColor3 = Theme.Text
+	Body.TextXAlignment = Enum.TextXAlignment.Left
+	Body.TextWrapped = true
+	Body.Text = opts.Text or ""
+	Body.LayoutOrder = 1
+	Body.Parent = Card
+
+	tween(Card, TweenInfo.new(0.2), {BackgroundTransparency = 0.05})
+	task.delay(opts.Duration or 3, function()
+		if not Card.Parent then return end
+		local out = tween(Card, TweenInfo.new(0.25), {BackgroundTransparency = 1})
+		out.Completed:Connect(function() Card:Destroy() end)
+	end)
+end
+
+-- ---- Конфиги (Flags -> JSON) ----
+function Window:SaveConfig(name)
+	if not hasFileIO then
+		self:Notify({ Title = "Config", Text = "Файловый API недоступен", Type = "error" })
+		return false
+	end
+	name = name or "default"
+	local folder = self.ConfigFolder
+	if typeof(makefolder) == "function" and typeof(isfolder) == "function" and not isfolder(folder) then
+		pcall(makefolder, folder)
+	end
+	local data = {}
+	for flag, val in pairs(self.Flags) do
+		if typeof(val) == "Color3" then
+			data[flag] = { __c3 = { val.R, val.G, val.B } }
+		elseif typeof(val) == "EnumItem" then
+			data[flag] = { __enum = tostring(val) }
+		else
+			data[flag] = val
+		end
+	end
+	local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
+	if not ok then return false end
+	local wok = pcall(writefile, folder .. "/" .. name .. ".json", encoded)
+	if wok then
+		self:Notify({ Title = "Config", Text = "Сохранён: " .. name, Type = "success" })
+	end
+	return wok
+end
+
+function Window:LoadConfig(name)
+	if not hasFileIO then return false end
+	name = name or "default"
+	local path = self.ConfigFolder .. "/" .. name .. ".json"
+	if not isfile(path) then
+		self:Notify({ Title = "Config", Text = "Не найден: " .. name, Type = "error" })
+		return false
+	end
+	local ok, content = pcall(readfile, path)
+	if not ok then return false end
+	local dok, data = pcall(function() return HttpService:JSONDecode(content) end)
+	if not dok or type(data) ~= "table" then return false end
+	for flag, raw in pairs(data) do
+		local val = raw
+		if type(raw) == "table" then
+			if raw.__c3 then
+				val = Color3.new(raw.__c3[1], raw.__c3[2], raw.__c3[3])
+			elseif raw.__enum then
+				local parts = string.split(raw.__enum, ".")
+				local eok, e = pcall(function() return Enum[parts[2]][parts[3]] end)
+				val = eok and e or nil
+			end
+		end
+		local setter = self.FlagSetters[flag]
+		if setter and val ~= nil then safeCall(setter, val) end
+	end
+	self:Notify({ Title = "Config", Text = "Загружен: " .. name, Type = "success" })
+	return true
+end
+
+function Window:ListConfigs()
+	local out = {}
+	if not (hasFileIO and typeof(listfiles) == "function") then return out end
+	local folder = self.ConfigFolder
+	if typeof(isfolder) == "function" and not isfolder(folder) then return out end
+	local ok, files = pcall(listfiles, folder)
+	if not ok then return out end
+	for _, f in ipairs(files) do
+		local nm = string.match(f, "([^/\\]+)%.json$")
+		if nm then table.insert(out, nm) end
+	end
+	return out
 end
 
 -- ---- Список кейбиндов ----
@@ -432,9 +591,7 @@ function Window:_ensureKeybindList()
 	Title.LayoutOrder = 0
 	Title.Parent = Frame
 
-	-- Перетаскивание панели (коннекты трекаются)
 	makeDraggable(Frame, Frame, self.Connections)
-
 	self.KeybindListFrame = Frame
 end
 
@@ -458,7 +615,6 @@ function Window:_addKeybindRow(label, initialKeyName)
 	reg(self.ThemedInstances, Row, "TextColor3", function() return Theme.Text end)
 
 	table.insert(self.KeybindRows, Row)
-
 	return function(newKeyName)
 		Row.Text = label .. ": " .. newKeyName
 	end
@@ -570,7 +726,8 @@ function Window:SelectMainTab(tab)
 end
 
 -- ====================== ПОД-ВКЛАДКИ ======================
-function MainTab:AddSubTab(name)
+-- builder (опционально): function(subTab) — выполнится при ПЕРВОМ открытии вкладки (lazy).
+function MainTab:AddSubTab(name, builder)
 	local window = self.Window
 	local Theme = window.Theme
 
@@ -623,6 +780,8 @@ function MainTab:AddSubTab(name)
 		Page = Page,
 		Left = Left,
 		Right = Right,
+		_builder = builder,
+		_built = false,
 	}, SubTab)
 
 	table.insert(self.SubTabs, subTab)
@@ -655,6 +814,13 @@ end
 function MainTab:SelectSubTab(subTab)
 	if self.CurrentSubTab == subTab then return end
 	local Theme = self.Window.Theme
+
+	-- Ленивая отрисовка: строим содержимое при первом открытии.
+	if not subTab._built then
+		subTab._built = true
+		if subTab._builder then safeCall(subTab._builder, subTab) end
+	end
+
 	local old = self.CurrentSubTab
 	self.CurrentSubTab = subTab
 
@@ -673,6 +839,7 @@ function MainTab:SelectSubTab(subTab)
 end
 
 -- ====================== СЕКЦИИ ======================
+-- Заголовок секции кликабельный — сворачивает/разворачивает тело.
 local function buildSection(parent, name, window)
 	local Theme = window.Theme
 
@@ -684,12 +851,14 @@ local function buildSection(parent, name, window)
 	corner(Frame, 8)
 	reg(window.ThemedInstances, Frame, "BackgroundColor3", function() return Theme.Section end)
 	reg(window.ThemedInstances, stroke(Frame, Theme.Stroke, 1), "Color", function() return Theme.Stroke end)
-
 	listLayout(Frame, 6)
 	padUniform(Frame, 10)
 
-	local Title = Instance.new("TextLabel")
+	table.insert(window.Sections, Frame)
+
+	local Title = Instance.new("TextButton")
 	Title.BackgroundTransparency = 1
+	Title.AutoButtonColor = false
 	Title.Size = UDim2.new(1, 0, 0, 18)
 	Title.Font = Enum.Font.GothamBold
 	Title.TextSize = 13
@@ -698,6 +867,16 @@ local function buildSection(parent, name, window)
 	Title.TextXAlignment = Enum.TextXAlignment.Left
 	Title.LayoutOrder = 0
 	Title.Parent = Frame
+
+	local collapsed = false
+	track(window.Connections, Title.MouseButton1Click:Connect(function()
+		collapsed = not collapsed
+		for _, ch in ipairs(Frame:GetChildren()) do
+			if ch:IsA("GuiObject") and ch ~= Title then
+				ch.Visible = not collapsed
+			end
+		end
+	end))
 
 	return setmetatable({ Frame = Frame, Order = 1, Window = window }, Section)
 end
@@ -716,7 +895,9 @@ function Section:_order()
 end
 
 -- ---- Toggle ----
-function Section:AddToggle(text, default, callback)
+function Section:AddToggle(text, default, callback, opts)
+	opts = opts or {}
+	local flag = opts.Flag
 	default = default or false
 	local window = self.Window
 	local Theme = window.Theme
@@ -753,23 +934,15 @@ function Section:AddToggle(text, default, callback)
 
 	local state = default
 
-	-- Тематические геттеры зависят от текущего состояния тоггла.
-	reg(window.ThemedInstances, Track, "BackgroundColor3", function()
-		return state and Theme.Accent or Theme.Element
-	end)
-	reg(window.ThemedInstances, Knob, "BackgroundColor3", function()
-		return state and Color3.fromRGB(20, 20, 20) or Theme.White
-	end)
-	reg(window.ThemedInstances, Label, "TextColor3", function()
-		return state and Theme.Accent or Theme.Text
-	end)
+	reg(window.ThemedInstances, Track, "BackgroundColor3", function() return state and Theme.Accent or Theme.Element end)
+	reg(window.ThemedInstances, Knob, "BackgroundColor3", function() return state and Color3.fromRGB(20,20,20) or Theme.White end)
+	reg(window.ThemedInstances, Label, "TextColor3", function() return state and Theme.Accent or Theme.Text end)
 
 	local function applyPositions(animate)
 		local trackColor = state and Theme.Accent or Theme.Element
 		local knobColor = state and Color3.fromRGB(20, 20, 20) or Theme.White
 		local knobPos = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
 		local textColor = state and Theme.Accent or Theme.Text
-
 		if animate then
 			tween(Track, TweenInfo.new(0.15), {BackgroundColor3 = trackColor})
 			tween(Knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {Position = knobPos, BackgroundColor3 = knobColor})
@@ -786,10 +959,17 @@ function Section:AddToggle(text, default, callback)
 	local function set(v, fire)
 		state = v
 		applyPositions(true)
-		if fire ~= false and callback then callback(state) end
+		if flag then window.Flags[flag] = state end
+		if fire ~= false then safeCall(callback, state) end
 	end
 
 	track(window.Connections, Row.MouseButton1Click:Connect(function() set(not state) end))
+
+	if flag then
+		window.Flags[flag] = state
+		window.FlagSetters[flag] = function(v) set(v, true) end
+	end
+	window:_registerElement(text, Row, self.Frame)
 
 	return {
 		Set = function(_, v) set(v, false) end,
@@ -797,52 +977,10 @@ function Section:AddToggle(text, default, callback)
 	}
 end
 
--- ---- Placeholder ----
-function Section:AddPlaceholder(text)
-	local window = self.Window
-	local Theme = window.Theme
-
-	local Row = Instance.new("Frame")
-	Row.Size = UDim2.new(1, 0, 0, 26)
-	Row.BackgroundTransparency = 1
-	Row.LayoutOrder = self:_order()
-	Row.Parent = self.Frame
-
-	local Track = Instance.new("Frame")
-	Track.Size = UDim2.fromOffset(32, 16)
-	Track.Position = UDim2.new(0, 0, 0.5, -8)
-	Track.BackgroundTransparency = 0.4
-	Track.Parent = Row
-	corner(Track, 8)
-	reg(window.ThemedInstances, Track, "BackgroundColor3", function() return Theme.Element end)
-
-	local Label = Instance.new("TextLabel")
-	Label.BackgroundTransparency = 1
-	Label.Position = UDim2.new(0, 40, 0, 0)
-	Label.Size = UDim2.new(1, -70, 1, 0)
-	Label.Font = Enum.Font.Gotham
-	Label.TextSize = 14
-	Label.TextColor3 = Theme.Disabled
-	Label.TextXAlignment = Enum.TextXAlignment.Left
-	Label.Text = text
-	Label.Parent = Row
-
-	local NA = Instance.new("TextLabel")
-	NA.BackgroundTransparency = 1
-	NA.Position = UDim2.new(1, -40, 0, 0)
-	NA.Size = UDim2.new(0, 40, 1, 0)
-	NA.Font = Enum.Font.Gotham
-	NA.TextSize = 12
-	NA.TextColor3 = Theme.Disabled
-	NA.TextXAlignment = Enum.TextXAlignment.Right
-	NA.Text = "N/A"
-	NA.Parent = Row
-
-	return Row
-end
-
 -- ---- Slider ----
-function Section:AddSlider(text, min, max, default, unit, callback)
+function Section:AddSlider(text, min, max, default, unit, callback, opts)
+	opts = opts or {}
+	local flag = opts.Flag
 	min = min or 0
 	max = max or 100
 	default = math.clamp(default or min, min, max)
@@ -858,68 +996,72 @@ function Section:AddSlider(text, min, max, default, unit, callback)
 
 	local Label = Instance.new("TextLabel")
 	Label.BackgroundTransparency = 1
-	Label.Size = UDim2.new(1, 0, 0, 16)
+	Label.Position = UDim2.new(0, 0, 0, 0)
+	Label.Size = UDim2.new(1, -60, 0, 16)
 	Label.Font = Enum.Font.Gotham
-	Label.TextSize = 13
-	Label.TextColor3 = Theme.Text
+	Label.TextSize = 14
 	Label.TextXAlignment = Enum.TextXAlignment.Left
 	Label.Text = text
 	Label.Parent = Container
-
-	local Bar = Instance.new("Frame")
-	Bar.Position = UDim2.new(0, 0, 0, 20)
-	Bar.Size = UDim2.new(1, 0, 0, 18)
-	Bar.Parent = Container
-	corner(Bar, 4)
-	reg(window.ThemedInstances, Bar, "BackgroundColor3", function() return Theme.Element end)
-
-	local Fill = Instance.new("Frame")
-	Fill.Size = UDim2.fromScale((default - min) / (max - min), 1)
-	Fill.Parent = Bar
-	corner(Fill, 4)
-	reg(window.ThemedInstances, Fill, "BackgroundColor3", function() return Theme.Accent end)
+	reg(window.ThemedInstances, Label, "TextColor3", function() return Theme.Text end)
 
 	local ValueLabel = Instance.new("TextLabel")
 	ValueLabel.BackgroundTransparency = 1
-	ValueLabel.Size = UDim2.fromScale(1, 1)
+	ValueLabel.Position = UDim2.new(1, -60, 0, 0)
+	ValueLabel.Size = UDim2.new(0, 60, 0, 16)
 	ValueLabel.Font = Enum.Font.GothamBold
-	ValueLabel.TextSize = 12
-	ValueLabel.TextColor3 = Color3.fromRGB(20, 20, 20)
-	ValueLabel.Text = tostring(default) .. unit .. "/" .. tostring(max) .. unit
-	ValueLabel.ZIndex = 2
-	ValueLabel.Parent = Bar
+	ValueLabel.TextSize = 13
+	ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+	ValueLabel.Parent = Container
+	reg(window.ThemedInstances, ValueLabel, "TextColor3", function() return Theme.Accent end)
 
-	local currentValue = default
+	local Bar = Instance.new("TextButton")
+	Bar.AutoButtonColor = false
+	Bar.Text = ""
+	Bar.Position = UDim2.new(0, 0, 0, 26)
+	Bar.Size = UDim2.new(1, 0, 0, 6)
+	Bar.Parent = Container
+	corner(Bar, 3)
+	reg(window.ThemedInstances, Bar, "BackgroundColor3", function() return Theme.Element end)
 
-	local function render(value)
+	local Fill = Instance.new("Frame")
+	Fill.Size = UDim2.new(0, 0, 1, 0)
+	Fill.BorderSizePixel = 0
+	Fill.Parent = Bar
+	corner(Fill, 3)
+	reg(window.ThemedInstances, Fill, "BackgroundColor3", function() return Theme.Accent end)
+
+	local decimals = opts.Decimals or 0
+	local mult = 10 ^ decimals
+	local value = default
+
+	local function render()
 		local rel = (max > min) and (value - min) / (max - min) or 0
-		tween(Fill, TweenInfo.new(0.05), {Size = UDim2.fromScale(rel, 1)})
-		ValueLabel.Text = tostring(value) .. unit .. "/" .. tostring(max) .. unit
-		-- Автоконтраст текста в зависимости от заполнения полосы.
-		ValueLabel.TextColor3 = (rel > 0.15) and Color3.fromRGB(20, 20, 20) or Theme.Text
+		Fill.Size = UDim2.new(rel, 0, 1, 0)
+		local shown = (decimals > 0) and string.format("%." .. decimals .. "f", value) or tostring(math.floor(value + 0.5))
+		ValueLabel.Text = shown .. unit
 	end
+	render()
 
-	local function setValue(value, fire)
-		value = math.clamp(math.floor(value + 0.5), min, max)
-		currentValue = value
-		render(value)
-		if fire ~= false and callback then callback(value) end
+	local function set(v, fire)
+		v = math.clamp(v, min, max)
+		v = math.floor(v * mult + 0.5) / mult
+		value = v
+		render()
+		if flag then window.Flags[flag] = value end
+		if fire ~= false then safeCall(callback, value) end
 	end
-
-	local function updateFromInput(inputPos)
-		local rel = math.clamp((inputPos.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
-		setValue(min + (max - min) * rel, true)
-	end
-
-	render(default)
 
 	local dragging = false
+	local function updateFromX(x)
+		local rel = math.clamp((x - Bar.AbsolutePosition.X) / math.max(Bar.AbsoluteSize.X, 1), 0, 1)
+		set(min + (max - min) * rel, true)
+	end
 
-	-- Все три коннекта теперь трекаются -> корректный Destroy(), без утечек.
 	track(window.Connections, Bar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
-			updateFromInput(input.Position)
+			updateFromX(input.Position.X)
 		end
 	end))
 	track(window.Connections, UserInputService.InputEnded:Connect(function(input)
@@ -929,25 +1071,32 @@ function Section:AddSlider(text, min, max, default, unit, callback)
 	end))
 	track(window.Connections, UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			updateFromInput(input.Position)
+			updateFromX(input.Position.X)
 		end
 	end))
 
+	if flag then
+		window.Flags[flag] = value
+		window.FlagSetters[flag] = function(v) set(v, true) end
+	end
+	window:_registerElement(text, Container, self.Frame)
+
 	return {
-		Set = function(_, v) setValue(v, false) end,
-		Get = function() return currentValue end,
+		Set = function(_, v) set(v, false) end,
+		Get = function() return value end,
 	}
 end
 
 -- ---- Dropdown ----
-function Section:AddDropdown(text, options, default, callback)
+function Section:AddDropdown(text, options, default, callback, opts)
+	opts = opts or {}
+	local flag = opts.Flag
 	options = options or {}
-	default = default or options[1] or ""
 	local window = self.Window
 	local Theme = window.Theme
 
 	local Container = Instance.new("Frame")
-	Container.Size = UDim2.new(1, 0, 0, 40)
+	Container.Size = UDim2.new(1, 0, 0, 44)
 	Container.BackgroundTransparency = 1
 	Container.ClipsDescendants = false
 	Container.LayoutOrder = self:_order()
@@ -957,110 +1106,107 @@ function Section:AddDropdown(text, options, default, callback)
 	Label.BackgroundTransparency = 1
 	Label.Size = UDim2.new(1, 0, 0, 16)
 	Label.Font = Enum.Font.Gotham
-	Label.TextSize = 13
-	Label.TextColor3 = Theme.Text
+	Label.TextSize = 14
 	Label.TextXAlignment = Enum.TextXAlignment.Left
 	Label.Text = text
 	Label.Parent = Container
+	reg(window.ThemedInstances, Label, "TextColor3", function() return Theme.Text end)
 
 	local Head = Instance.new("TextButton")
-	Head.Position = UDim2.new(0, 0, 0, 20)
-	Head.Size = UDim2.new(1, 0, 0, 20)
 	Head.AutoButtonColor = false
-	Head.Text = ""
+	Head.Position = UDim2.new(0, 0, 0, 20)
+	Head.Size = UDim2.new(1, 0, 0, 24)
+	Head.Font = Enum.Font.Gotham
+	Head.TextSize = 13
+	Head.TextXAlignment = Enum.TextXAlignment.Left
+	Head.Text = "  " .. tostring(default or (options[1] or "..."))
 	Head.Parent = Container
 	corner(Head, 5)
 	reg(window.ThemedInstances, Head, "BackgroundColor3", function() return Theme.Element end)
-
-	local SelectedLabel = Instance.new("TextLabel")
-	SelectedLabel.BackgroundTransparency = 1
-	SelectedLabel.Position = UDim2.new(0, 8, 0, 0)
-	SelectedLabel.Size = UDim2.new(1, -28, 1, 0)
-	SelectedLabel.Font = Enum.Font.Gotham
-	SelectedLabel.TextSize = 12
-	SelectedLabel.TextColor3 = Theme.Text
-	SelectedLabel.TextXAlignment = Enum.TextXAlignment.Left
-	SelectedLabel.Text = tostring(default)
-	SelectedLabel.Parent = Head
+	reg(window.ThemedInstances, Head, "TextColor3", function() return Theme.Text end)
 
 	local Arrow = Instance.new("TextLabel")
 	Arrow.BackgroundTransparency = 1
-	Arrow.Position = UDim2.new(1, -20, 0, 0)
-	Arrow.Size = UDim2.fromOffset(20, 20)
+	Arrow.Position = UDim2.new(1, -24, 0, 0)
+	Arrow.Size = UDim2.new(0, 24, 1, 0)
 	Arrow.Font = Enum.Font.GothamBold
 	Arrow.TextSize = 12
-	Arrow.TextColor3 = Theme.SubText
 	Arrow.Text = "▾"
 	Arrow.Parent = Head
+	reg(window.ThemedInstances, Arrow, "TextColor3", function() return Theme.SubText end)
 
-	local List = Instance.new("Frame")
-	List.Position = UDim2.new(0, 0, 0, 44)
-	List.Size = UDim2.new(1, 0, 0, 0)
-	List.ClipsDescendants = true
-	List.Visible = false
-	List.ZIndex = 5
-	List.Parent = Container
-	corner(List, 5)
-	reg(window.ThemedInstances, List, "BackgroundColor3", function() return Theme.Element end)
-	listLayout(List, 0)
+	local ListFrame = Instance.new("Frame")
+	ListFrame.Position = UDim2.new(0, 0, 0, 46)
+	ListFrame.Size = UDim2.new(1, 0, 0, 0)
+	ListFrame.BorderSizePixel = 0
+	ListFrame.ClipsDescendants = true
+	ListFrame.Visible = false
+	ListFrame.ZIndex = 5
+	ListFrame.Parent = Container
+	corner(ListFrame, 5)
+	reg(window.ThemedInstances, ListFrame, "BackgroundColor3", function() return Theme.Element end)
+	local listInner = listLayout(ListFrame, 0)
 
+	local selected = default or options[1]
 	local open = false
-	local listHeight = #options * 22
 
-	local function close()
-		open = false
-		tween(Arrow, TweenInfo.new(0.15), {Rotation = 0})
-		tween(Container, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 40)})
-		local t = tween(List, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 0)})
-		t.Completed:Connect(function()
-			if not open then List.Visible = false end
-		end)
+	local function setSelection(opt, fire)
+		if not table.find(options, opt) then return end
+		selected = opt
+		Head.Text = "  " .. tostring(opt)
+		if flag then window.Flags[flag] = selected end
+		if fire ~= false then safeCall(callback, selected) end
 	end
 
-	-- Устанавливает значение. Если fire ~= false — вызывает callback.
-	local function setSelection(opt, fire)
-		if #options > 0 and not table.find(options, opt) then
-			warn("[CustomLib] Dropdown '" .. text .. "': значение '" .. tostring(opt) .. "' нет в options")
+	local function setOpen(o)
+		open = o
+		Arrow.Text = o and "▴" or "▾"
+		local h = o and (#options * 24) or 0
+		if o then ListFrame.Visible = true end
+		tween(ListFrame, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, h)})
+		tween(Container, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 44 + (o and (h + 4) or 0))})
+		if not o then
+			task.delay(0.15, function() if not open then ListFrame.Visible = false end end)
 		end
-		SelectedLabel.Text = tostring(opt)
-		if fire ~= false and callback then callback(opt) end
 	end
 
 	for i, opt in ipairs(options) do
 		local OptBtn = Instance.new("TextButton")
-		OptBtn.Size = UDim2.new(1, 0, 0, 22)
-		OptBtn.LayoutOrder = i
+		OptBtn.AutoButtonColor = false
 		OptBtn.BackgroundTransparency = 1
+		OptBtn.Size = UDim2.new(1, 0, 0, 24)
 		OptBtn.Font = Enum.Font.Gotham
-		OptBtn.TextSize = 12
-		OptBtn.TextColor3 = Theme.SubText
-		OptBtn.Text = tostring(opt)
+		OptBtn.TextSize = 13
+		OptBtn.TextXAlignment = Enum.TextXAlignment.Left
+		OptBtn.Text = "  " .. tostring(opt)
+		OptBtn.LayoutOrder = i
 		OptBtn.ZIndex = 6
-		OptBtn.Parent = List
-		track(window.Connections, OptBtn.MouseEnter:Connect(function() tween(OptBtn, TweenInfo.new(0.1), {TextColor3 = Theme.Accent}) end))
-		track(window.Connections, OptBtn.MouseLeave:Connect(function() tween(OptBtn, TweenInfo.new(0.1), {TextColor3 = Theme.SubText}) end))
+		OptBtn.Parent = ListFrame
+		reg(window.ThemedInstances, OptBtn, "TextColor3", function() return Theme.SubText end)
+		track(window.Connections, OptBtn.MouseEnter:Connect(function()
+			tween(OptBtn, TweenInfo.new(0.1), {TextColor3 = Theme.Text})
+		end))
+		track(window.Connections, OptBtn.MouseLeave:Connect(function()
+			tween(OptBtn, TweenInfo.new(0.1), {TextColor3 = Theme.SubText})
+		end))
 		track(window.Connections, OptBtn.MouseButton1Click:Connect(function()
 			setSelection(opt, true)
-			close()
+			setOpen(false)
 		end))
 	end
 
-	track(window.Connections, Head.MouseButton1Click:Connect(function()
-		open = not open
-		if open then
-			List.Visible = true
-			tween(Arrow, TweenInfo.new(0.15), {Rotation = 180})
-			tween(List, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, listHeight)})
-			tween(Container, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 40 + listHeight)})
-		else
-			close()
-		end
-	end))
+	track(window.Connections, Head.MouseButton1Click:Connect(function() setOpen(not open) end))
+
+	if flag then
+		window.Flags[flag] = selected
+		window.FlagSetters[flag] = function(v) setSelection(v, true) end
+	end
+	window:_registerElement(text, Container, self.Frame)
 
 	return {
 		Set = function(_, v) setSelection(v, false) end,
-		Get = function() return SelectedLabel.Text end,
-		Close = close,
+		Get = function() return selected end,
+		Close = function() setOpen(false) end,
 	}
 end
 
@@ -1070,88 +1216,407 @@ function Section:AddButton(text, callback)
 	local Theme = window.Theme
 
 	local Btn = Instance.new("TextButton")
-	Btn.Size = UDim2.new(1, 0, 0, 28)
 	Btn.AutoButtonColor = false
-	Btn.Font = Enum.Font.Gotham
-	Btn.TextSize = 13
-	Btn.TextColor3 = Theme.Text
+	Btn.Size = UDim2.new(1, 0, 0, 30)
+	Btn.Font = Enum.Font.GothamMedium
+	Btn.TextSize = 14
 	Btn.Text = text
 	Btn.LayoutOrder = self:_order()
 	Btn.Parent = self.Frame
 	corner(Btn, 6)
 	reg(window.ThemedInstances, Btn, "BackgroundColor3", function() return Theme.Element end)
+	reg(window.ThemedInstances, Btn, "TextColor3", function() return Theme.Text end)
 
-	track(window.Connections, Btn.MouseEnter:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Accent, TextColor3 = Color3.fromRGB(20,20,20)}) end))
-	track(window.Connections, Btn.MouseLeave:Connect(function() tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element, TextColor3 = Theme.Text}) end))
-	track(window.Connections, Btn.MouseButton1Click:Connect(function() if callback then callback() end end))
+	track(window.Connections, Btn.MouseEnter:Connect(function()
+		tween(Btn, TweenInfo.new(0.12), {BackgroundColor3 = Theme.Stroke})
+	end))
+	track(window.Connections, Btn.MouseLeave:Connect(function()
+		tween(Btn, TweenInfo.new(0.12), {BackgroundColor3 = Theme.Element})
+	end))
+	track(window.Connections, Btn.MouseButton1Click:Connect(function()
+		tween(Btn, TweenInfo.new(0.08), {BackgroundColor3 = Theme.Accent})
+		task.delay(0.12, function()
+			tween(Btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Element})
+		end)
+		safeCall(callback)
+	end))
 
-	return Btn
+	window:_registerElement(text, Btn, self.Frame)
+	return { Fire = function() safeCall(callback) end }
 end
 
 -- ---- Label ----
 function Section:AddLabel(text)
-	local Theme = self.Window.Theme
-	local Label = Instance.new("TextLabel")
-	Label.BackgroundTransparency = 1
-	Label.Size = UDim2.new(1, 0, 0, 16)
-	Label.Font = Enum.Font.Gotham
-	Label.TextSize = 12
-	Label.TextColor3 = Theme.SubText
-	Label.TextXAlignment = Enum.TextXAlignment.Left
-	Label.Text = text
-	Label.LayoutOrder = self:_order()
-	Label.Parent = self.Frame
-	return Label
+	local window = self.Window
+	local Theme = window.Theme
+
+	local Lbl = Instance.new("TextLabel")
+	Lbl.BackgroundTransparency = 1
+	Lbl.Size = UDim2.new(1, 0, 0, 18)
+	Lbl.AutomaticSize = Enum.AutomaticSize.Y
+	Lbl.Font = Enum.Font.Gotham
+	Lbl.TextSize = 13
+	Lbl.TextXAlignment = Enum.TextXAlignment.Left
+	Lbl.TextWrapped = true
+	Lbl.Text = text
+	Lbl.LayoutOrder = self:_order()
+	Lbl.Parent = self.Frame
+	reg(window.ThemedInstances, Lbl, "TextColor3", function() return Theme.SubText end)
+
+	window:_registerElement(text, Lbl, self.Frame)
+	return { Set = function(_, v) Lbl.Text = v end }
 end
 
--- ---- Keybind ----
--- Клик -> "..." -> следующая нажатая клавиша идёт в callback.
--- Автоматически появляется строкой в панели Window:SetKeybindListVisible(true).
--- ВАЖНО: сигнатура без параметра window — окно берётся из self.Window.
-function Section:AddKeybind(text, default, callback)
+-- ---- Placeholder ----
+function Section:AddPlaceholder(height)
+	local Space = Instance.new("Frame")
+	Space.BackgroundTransparency = 1
+	Space.Size = UDim2.new(1, 0, 0, height or 4)
+	Space.LayoutOrder = self:_order()
+	Space.Parent = self.Frame
+	return Space
+end
+
+-- ---- TextInput ----
+function Section:AddInput(text, placeholder, default, callback, opts)
+	opts = opts or {}
+	local flag = opts.Flag
 	local window = self.Window
 	local Theme = window.Theme
 
 	local Container = Instance.new("Frame")
-	Container.Size = UDim2.new(1, 0, 0, 26)
+	Container.Size = UDim2.new(1, 0, 0, 44)
 	Container.BackgroundTransparency = 1
 	Container.LayoutOrder = self:_order()
 	Container.Parent = self.Frame
 
 	local Label = Instance.new("TextLabel")
 	Label.BackgroundTransparency = 1
-	Label.Size = UDim2.new(1, -80, 1, 0)
+	Label.Size = UDim2.new(1, 0, 0, 16)
 	Label.Font = Enum.Font.Gotham
 	Label.TextSize = 14
-	Label.TextColor3 = Theme.Text
 	Label.TextXAlignment = Enum.TextXAlignment.Left
 	Label.Text = text
 	Label.Parent = Container
+	reg(window.ThemedInstances, Label, "TextColor3", function() return Theme.Text end)
+
+	local Box = Instance.new("TextBox")
+	Box.Position = UDim2.new(0, 0, 0, 20)
+	Box.Size = UDim2.new(1, 0, 0, 24)
+	Box.Font = Enum.Font.Gotham
+	Box.TextSize = 13
+	Box.TextXAlignment = Enum.TextXAlignment.Left
+	Box.PlaceholderText = placeholder or ""
+	Box.Text = default or ""
+	Box.ClearTextOnFocus = false
+	Box.Parent = Container
+	corner(Box, 5)
+	local bp = Instance.new("UIPadding"); bp.PaddingLeft = UDim.new(0, 8); bp.Parent = Box
+	reg(window.ThemedInstances, Box, "BackgroundColor3", function() return Theme.Element end)
+	reg(window.ThemedInstances, Box, "TextColor3", function() return Theme.Text end)
+	reg(window.ThemedInstances, Box, "PlaceholderColor3", function() return Theme.SubText end)
+
+	local function set(v, fire)
+		Box.Text = tostring(v)
+		if flag then window.Flags[flag] = Box.Text end
+		if fire ~= false then safeCall(callback, Box.Text) end
+	end
+
+	track(window.Connections, Box.FocusLost:Connect(function(enterPressed)
+		if flag then window.Flags[flag] = Box.Text end
+		safeCall(callback, Box.Text, enterPressed)
+	end))
+
+	if flag then
+		window.Flags[flag] = Box.Text
+		window.FlagSetters[flag] = function(v) set(v, true) end
+	end
+	window:_registerElement(text, Container, self.Frame)
+
+	return {
+		Set = function(_, v) set(v, false) end,
+		Get = function() return Box.Text end,
+	}
+end
+
+-- ---- Colorpicker (HSV) ----
+function Section:AddColorpicker(text, default, callback, opts)
+	opts = opts or {}
+	local flag = opts.Flag
+	default = default or Color3.fromRGB(255, 255, 255)
+	local window = self.Window
+	local Theme = window.Theme
+
+	local h, s, v = Color3.toHSV(default)
+
+	local Container = Instance.new("Frame")
+	Container.Size = UDim2.new(1, 0, 0, 26)
+	Container.BackgroundTransparency = 1
+	Container.ClipsDescendants = false
+	Container.LayoutOrder = self:_order()
+	Container.Parent = self.Frame
+
+	local Label = Instance.new("TextLabel")
+	Label.BackgroundTransparency = 1
+	Label.Size = UDim2.new(1, -40, 0, 26)
+	Label.Font = Enum.Font.Gotham
+	Label.TextSize = 14
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Text = text
+	Label.Parent = Container
+	reg(window.ThemedInstances, Label, "TextColor3", function() return Theme.Text end)
+
+	local Swatch = Instance.new("TextButton")
+	Swatch.AutoButtonColor = false
+	Swatch.Text = ""
+	Swatch.Size = UDim2.fromOffset(28, 16)
+	Swatch.Position = UDim2.new(1, -28, 0, 5)
+	Swatch.BackgroundColor3 = default
+	Swatch.Parent = Container
+	corner(Swatch, 4)
+	reg(window.ThemedInstances, stroke(Swatch, Theme.Stroke, 1), "Color", function() return Theme.Stroke end)
+
+	local Popup = Instance.new("Frame")
+	Popup.Position = UDim2.new(0, 0, 0, 30)
+	Popup.Size = UDim2.new(1, 0, 0, 0)
+	Popup.BackgroundTransparency = 1
+	Popup.ClipsDescendants = true
+	Popup.Visible = false
+	Popup.ZIndex = 5
+	Popup.Parent = Container
+
+	local SV = Instance.new("Frame")
+	SV.Size = UDim2.new(1, -24, 0, 100)
+	SV.Position = UDim2.new(0, 0, 0, 0)
+	SV.ZIndex = 6
+	SV.Parent = Popup
+	corner(SV, 4)
+
+	local whiteOv = Instance.new("Frame")
+	whiteOv.Size = UDim2.fromScale(1, 1)
+	whiteOv.BackgroundColor3 = Color3.new(1, 1, 1)
+	whiteOv.BorderSizePixel = 0
+	whiteOv.ZIndex = 6
+	whiteOv.Parent = SV
+	corner(whiteOv, 4)
+	local wg = Instance.new("UIGradient")
+	wg.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
+	wg.Parent = whiteOv
+
+	local blackOv = Instance.new("Frame")
+	blackOv.Size = UDim2.fromScale(1, 1)
+	blackOv.BackgroundColor3 = Color3.new(0, 0, 0)
+	blackOv.BorderSizePixel = 0
+	blackOv.ZIndex = 6
+	blackOv.Parent = SV
+	corner(blackOv, 4)
+	local bg = Instance.new("UIGradient")
+	bg.Rotation = 90
+	bg.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) })
+	bg.Parent = blackOv
+
+	local svCursor = Instance.new("Frame")
+	svCursor.Size = UDim2.fromOffset(6, 6)
+	svCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+	svCursor.BackgroundColor3 = Color3.new(1, 1, 1)
+	svCursor.BorderSizePixel = 0
+	svCursor.ZIndex = 7
+	svCursor.Parent = SV
+	corner(svCursor, 3)
+	stroke(svCursor, Color3.new(0, 0, 0), 1)
+
+	local svCatcher = Instance.new("TextButton")
+	svCatcher.AutoButtonColor = false
+	svCatcher.Text = ""
+	svCatcher.BackgroundTransparency = 1
+	svCatcher.Size = UDim2.fromScale(1, 1)
+	svCatcher.ZIndex = 8
+	svCatcher.Parent = SV
+
+	local Hue = Instance.new("Frame")
+	Hue.Size = UDim2.new(0, 16, 0, 100)
+	Hue.Position = UDim2.new(1, -16, 0, 0)
+	Hue.BorderSizePixel = 0
+	Hue.ZIndex = 6
+	Hue.Parent = Popup
+	corner(Hue, 4)
+	local hg = Instance.new("UIGradient")
+	hg.Rotation = 90
+	hg.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+		ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+		ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+		ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
+		ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+		ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+		ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
+	})
+	hg.Parent = Hue
+
+	local hueCursor = Instance.new("Frame")
+	hueCursor.Size = UDim2.new(1, 2, 0, 3)
+	hueCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+	hueCursor.Position = UDim2.new(0.5, 0, 0, 0)
+	hueCursor.BackgroundColor3 = Color3.new(1, 1, 1)
+	hueCursor.BorderSizePixel = 0
+	hueCursor.ZIndex = 7
+	hueCursor.Parent = Hue
+	stroke(hueCursor, Color3.new(0, 0, 0), 1)
+
+	local hueCatcher = Instance.new("TextButton")
+	hueCatcher.AutoButtonColor = false
+	hueCatcher.Text = ""
+	hueCatcher.BackgroundTransparency = 1
+	hueCatcher.Size = UDim2.fromScale(1, 1)
+	hueCatcher.ZIndex = 8
+	hueCatcher.Parent = Hue
+
+	local function getColor() return Color3.fromHSV(h, s, v) end
+	local function refresh()
+		SV.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+		svCursor.Position = UDim2.fromScale(s, 1 - v)
+		hueCursor.Position = UDim2.new(0.5, 0, h, 0)
+		Swatch.BackgroundColor3 = getColor()
+	end
+	refresh()
+
+	local function fireColor()
+		if flag then window.Flags[flag] = getColor() end
+		safeCall(callback, getColor())
+	end
+
+	local function set(color, fire)
+		h, s, v = Color3.toHSV(color)
+		refresh()
+		if flag then window.Flags[flag] = getColor() end
+		if fire ~= false then safeCall(callback, getColor()) end
+	end
+
+	local function updateSV(pos)
+		s = math.clamp((pos.X - SV.AbsolutePosition.X) / math.max(SV.AbsoluteSize.X, 1), 0, 1)
+		v = 1 - math.clamp((pos.Y - SV.AbsolutePosition.Y) / math.max(SV.AbsoluteSize.Y, 1), 0, 1)
+		refresh()
+		fireColor()
+	end
+	local function updateHue(pos)
+		h = math.clamp((pos.Y - Hue.AbsolutePosition.Y) / math.max(Hue.AbsoluteSize.Y, 1), 0, 1)
+		refresh()
+		fireColor()
+	end
+
+	local svDrag, hueDrag = false, false
+	track(window.Connections, svCatcher.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			svDrag = true
+			updateSV(input.Position)
+		end
+	end))
+	track(window.Connections, hueCatcher.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			hueDrag = true
+			updateHue(input.Position)
+		end
+	end))
+	track(window.Connections, UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			svDrag = false
+			hueDrag = false
+		end
+	end))
+	track(window.Connections, UserInputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			if svDrag then updateSV(input.Position)
+			elseif hueDrag then updateHue(input.Position) end
+		end
+	end))
+
+	local open = false
+	local popupHeight = 108
+	local function setOpen(o)
+		open = o
+		if o then Popup.Visible = true end
+		tween(Popup, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, o and popupHeight or 0)})
+		tween(Container, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 26 + (o and (popupHeight + 6) or 0))})
+		if not o then
+			task.delay(0.15, function() if not open then Popup.Visible = false end end)
+		end
+	end
+	track(window.Connections, Swatch.MouseButton1Click:Connect(function() setOpen(not open) end))
+
+	if flag then
+		window.Flags[flag] = getColor()
+		window.FlagSetters[flag] = function(c) set(c, true) end
+	end
+	window:_registerElement(text, Container, self.Frame)
+
+	return {
+		Set = function(_, c) set(c, false) end,
+		Get = function() return getColor() end,
+		Close = function() setOpen(false) end,
+	}
+end
+
+-- ---- Keybind ----
+function Section:AddKeybind(text, default, callback, opts)
+	opts = opts or {}
+	local flag = opts.Flag
+	local window = self.Window
+	local Theme = window.Theme
+
+	local Row = Instance.new("Frame")
+	Row.Size = UDim2.new(1, 0, 0, 26)
+	Row.BackgroundTransparency = 1
+	Row.LayoutOrder = self:_order()
+	Row.Parent = self.Frame
+
+	local Label = Instance.new("TextLabel")
+	Label.BackgroundTransparency = 1
+	Label.Size = UDim2.new(1, -80, 1, 0)
+	Label.Font = Enum.Font.Gotham
+	Label.TextSize = 14
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Text = text
+	Label.Parent = Row
+	reg(window.ThemedInstances, Label, "TextColor3", function() return Theme.Text end)
 
 	local KeyBtn = Instance.new("TextButton")
-	KeyBtn.Position = UDim2.new(1, -72, 0.5, -11)
-	KeyBtn.Size = UDim2.fromOffset(72, 22)
 	KeyBtn.AutoButtonColor = false
-	KeyBtn.Font = Enum.Font.Gotham
+	KeyBtn.Position = UDim2.new(1, -76, 0.5, -11)
+	KeyBtn.Size = UDim2.fromOffset(76, 22)
+	KeyBtn.Font = Enum.Font.GothamMedium
 	KeyBtn.TextSize = 12
-	KeyBtn.TextColor3 = Theme.Text
 	KeyBtn.Text = default and default.Name or "..."
-	KeyBtn.Parent = Container
+	KeyBtn.Parent = Row
 	corner(KeyBtn, 5)
 	reg(window.ThemedInstances, KeyBtn, "BackgroundColor3", function() return Theme.Element end)
+	reg(window.ThemedInstances, KeyBtn, "TextColor3", function() return Theme.Text end)
 
-	local updateListRow = window:_addKeybindRow(text, KeyBtn.Text)
+	local current = default
+	local updateListRow = window:_addKeybindRow(text, current and current.Name or "...")
+
+	local function applyKey(keyCode, fire)
+		current = keyCode
+		KeyBtn.Text = keyCode and keyCode.Name or "..."
+		updateListRow(KeyBtn.Text)
+		if flag then window.Flags[flag] = keyCode end
+		if fire ~= false then safeCall(callback, keyCode) end
+	end
 
 	track(window.Connections, KeyBtn.MouseButton1Click:Connect(function()
 		KeyBtn.Text = "..."
-		window:CaptureNextKey(function(keyCode)
-			KeyBtn.Text = keyCode.Name
-			updateListRow(keyCode.Name)
-			if callback then callback(keyCode) end
-		end)
+		window:CaptureNextKey(function(kc) applyKey(kc, true) end)
 	end))
 
-	return KeyBtn
+	if flag then
+		window.Flags[flag] = current
+		window.FlagSetters[flag] = function(k) applyKey(k, true) end
+	end
+	window:_registerElement(text, Row, self.Frame)
+
+	return {
+		Set = function(_, k) applyKey(k, false) end,
+		Get = function() return current end,
+	}
 end
 
 return Library
